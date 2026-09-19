@@ -1,0 +1,1 @@
+Unified browser and Windows desktop observation/action contracts. BrowserTool and DesktopTool remain the execution authorities; this package only validates shared observations, structured actions, and visual confidence.

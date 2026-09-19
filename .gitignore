@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.db
+playwright/.auth/
+backend/screenshots/
+runtime/
+
+# Local credentials, browser sessions, and secret material
+**/token*.json
+**/*credentials*.json
+**/*secret*
+**/*.pem
+**/*.key
+**/browser-profile/
+**/storage-state*.json
+**/auth-state*.json

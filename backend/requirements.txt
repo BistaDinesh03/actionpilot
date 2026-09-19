@@ -1,0 +1,13 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.5
+pytest==8.3.4
+httpx==0.28.1
+playwright==1.49.1
+google-api-python-client==2.159.0
+google-auth==2.37.0
+google-auth-oauthlib==1.2.1
+email-validator==2.2.0
+pywinauto==0.6.8
+pillow==11.1.0
+pyperclip==1.9.0
