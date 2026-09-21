@@ -10,13 +10,24 @@ class LocatorResolutionError(RuntimeError):
 
 
 def _usable(locator: Locator) -> Locator | None:
+    """Return the first visible match among all matches for this locator.
+
+    Playwright locators often match multiple elements (e.g. a hidden mobile
+    search input plus a visible header search input). We must not reject the
+    whole strategy just because .first is hidden.
+    """
     try:
-        if locator.count() == 0:
+        count = locator.count()
+        if count == 0:
             return None
-        candidate = locator.first
-        if not candidate.is_visible():
-            return None
-        return candidate
+        for index in range(count):
+            candidate = locator.nth(index)
+            try:
+                if candidate.is_visible():
+                    return candidate
+            except Exception:
+                continue
+        return None
     except Exception:
         return None
 

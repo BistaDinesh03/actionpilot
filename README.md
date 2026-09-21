@@ -4,6 +4,8 @@
 
 ActionPilot is a local-first automation MVP. It stores reusable skills in SQLite, matches natural-language commands deterministically, extracts explicit variables, and keeps review and approval in the user's hands.
 
+**New to ActionPilot? Read [docs/USER_GUIDE.md](docs/USER_GUIDE.md).**
+
 ## Current MVP
 
 - React + Vite command center with Skills, Teach, Runs, Connections, and Settings surfaces.

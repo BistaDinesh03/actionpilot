@@ -19,7 +19,10 @@ class BrowserSession:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         self.playwright = sync_playwright().start()
         self.browser = self.playwright.chromium.launch(headless=self.headless)
-        self.context = self.browser.new_context()
+        self.context = self.browser.new_context(
+            record_video_dir=str(self.runtime_dir / "video"),
+            record_video_size={"width": 1280, "height": 720},
+        )
         self.page = self.context.new_page()
         return self.page
 
@@ -27,7 +30,7 @@ class BrowserSession:
         if not self.page:
             return None
         path = self.runtime_dir / name
-        self.page.screenshot(path=str(path), full_page=True)
+        self.page.screenshot(path=str(path), full_page=False)
         return str(path)
 
     def close(self) -> None:

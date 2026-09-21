@@ -21,3 +21,7 @@ runtime/
 **/browser-profile/
 **/storage-state*.json
 **/auth-state*.json
+
+# Session backups created during development
+*.bak*
+

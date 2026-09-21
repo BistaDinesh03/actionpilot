@@ -1,1 +1,15 @@
-{"name":"actionpilot-extension","private":true,"version":"0.1.0","type":"module","scripts":{"build":"tsc -p tsconfig.json","test":"tsc -p tsconfig.json --noEmit"},"devDependencies":{"@types/chrome":"latest","typescript":"latest"}}
+﻿{
+  "name": "actionpilot-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/background.ts --bundle --format=esm --target=chrome110 --outfile=dist/background.js && esbuild src/content.ts --bundle --format=iife --target=chrome110 --outfile=dist/content.js && esbuild src/popup.ts --bundle --format=esm --target=chrome110 --outfile=dist/popup.js",
+    "test": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "latest",
+    "esbuild": "latest",
+    "typescript": "latest"
+  }
+}

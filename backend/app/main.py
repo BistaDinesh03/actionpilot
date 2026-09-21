@@ -11,8 +11,12 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, RedirectResponse
+import asyncio, sys
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .services.execution.executor import BrowserExecutor, ConfirmationRequired, ExecutionStopped
@@ -45,6 +49,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.mount("/guide", StaticFiles(directory=ROOT / "docs"), name="guide")
 
 
 def now() -> str:
@@ -145,7 +152,7 @@ class Target(BaseModel):
 
 
 class Step(BaseModel):
-    type: Literal["click", "type", "navigate", "select", "check", "uncheck", "press", "submit", "scroll", "wait"]
+    type: Literal["click", "type", "navigate", "select", "check", "uncheck", "press", "submit", "scroll", "wait", "assert"]
     label: str = Field(min_length=1, max_length=200)
     timestamp: str | None = None
     url: str | None = None
@@ -199,7 +206,7 @@ class TeachStart(BaseModel):
 
 
 class TeachEvent(BaseModel):
-    type: Literal["click", "type", "navigate", "select", "check", "uncheck", "press", "submit", "scroll", "wait"]
+    type: Literal["click", "type", "navigate", "select", "check", "uncheck", "press", "submit", "scroll", "wait", "assert"]
     label: str = Field(default="Browser action", max_length=200)
     timestamp: str | None = None
     url: str | None = Field(default=None, max_length=2000)
@@ -374,6 +381,102 @@ def get_skill(skill_id: str) -> dict[str, Any]:
     if not row:
         raise HTTPException(404, "Skill not found")
     return skill_from_row(row)
+
+
+def _python_to_playwright_locator(target: dict[str, Any]) -> str | None:
+    if not target:
+        return None
+    if target.get("test_id"):
+        return "page.getByTestId(" + repr(target["test_id"]) + ")"
+    if target.get("label"):
+        return "page.getByLabel(" + repr(target["label"]) + ")"
+    if target.get("placeholder"):
+        return "page.getByPlaceholder(" + repr(target["placeholder"]) + ")"
+    if target.get("css"):
+        return "page.locator(" + repr(target["css"]) + ")"
+    if target.get("xpath"):
+        return "page.locator(" + repr("xpath=" + target["xpath"]) + ")"
+    if target.get("role") and target.get("name"):
+        return "page.getByRole(" + repr(target["role"]) + ", name=" + repr(target["name"]) + ")"
+    if target.get("role") and target.get("text"):
+        return "page.getByRole(" + repr(target["role"]) + ", { name: " + repr(target["text"][:60]) + " })"
+    if target.get("text"):
+        return "page.locator(" + repr("text=" + target["text"][:60]) + ")"
+    if target.get("tag"):
+        return "page.locator(" + repr(target["tag"]) + ")"
+    return None
+
+
+def _skill_to_playwright(skill: dict[str, Any]) -> str:
+    name = skill.get("name", "skill")
+    lines: list[str] = []
+    lines.append("import { test, expect } from '@playwright/test';")
+    lines.append("")
+    lines.append("test(" + repr(name) + ", async ({ page }) => {")
+    for step in skill.get("steps", []):
+        stype = step.get("type")
+        value = step.get("value")
+        target = step.get("target") or {}
+        if stype == "navigate":
+            url = step.get("url") or value or "about:blank"
+            lines.append("  await page.goto(" + repr(url) + ");")
+            continue
+        loc = _python_to_playwright_locator(target)
+        if not loc and stype not in ("wait", "assert"):
+            lines.append("  // skipped step with no target: " + str(stype))
+            continue
+        if stype == "wait":
+            # value is the timeout in ms; if no target, it is a fixed sleep.
+            try:
+                timeout_ms = int(value or 500)
+            except (TypeError, ValueError):
+                timeout_ms = 500
+            if target and loc:
+                lines.append("  await " + loc + ".waitFor({ state: 'visible', timeout: " + str(timeout_ms) + " });")
+            else:
+                lines.append("  await page.waitForTimeout(" + str(timeout_ms) + ");")
+            continue
+        if stype == "assert":
+            try:
+                timeout_ms = int(value or 5000)
+            except (TypeError, ValueError):
+                timeout_ms = 5000
+            if loc:
+                lines.append("  await expect(" + loc + ").toBeVisible({ timeout: " + str(timeout_ms) + " });")
+            else:
+                lines.append("  // assert step has no target")
+            continue
+        if stype in ("click", "submit"):
+            lines.append("  await " + loc + ".click();")
+        elif stype == "type":
+            lines.append("  await " + loc + ".fill(" + repr(value or "") + ");")
+        elif stype == "press":
+            lines.append("  await " + loc + ".press(" + repr(value or "Enter") + ");")
+        elif stype == "select":
+            lines.append("  await " + loc + ".selectOption(" + repr(value or "") + ");")
+        elif stype == "check":
+            lines.append("  await " + loc + ".check();")
+        elif stype == "uncheck":
+            lines.append("  await " + loc + ".uncheck();")
+        elif stype == "scroll":
+            lines.append("  await " + loc + ".scrollIntoViewIfNeeded();")
+        else:
+            lines.append("  // unsupported step type: " + str(stype))
+    lines.append("});")
+    lines.append("")
+    return "\n".join(lines)
+
+
+@app.get("/api/skills/{skill_id}/export/playwright")
+def export_skill_playwright(skill_id: str) -> PlainTextResponse:
+    skill = get_skill(skill_id)
+    code = _skill_to_playwright(skill)
+    safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in skill["name"])[:60] or "skill"
+    return PlainTextResponse(
+        code,
+        media_type="text/typescript",
+        headers={"Content-Disposition": "attachment; filename=" + safe + ".spec.ts"},
+    )
 
 
 @app.put("/api/skills/{skill_id}")
@@ -666,6 +769,31 @@ def get_run_screenshot(run_id: str) -> FileResponse:
     return FileResponse(screenshot, media_type="image/png", filename=Path(screenshot).name)
 
 
+@app.get("/api/runs/{run_id}/video")
+def get_run_video(run_id: str) -> FileResponse:
+    run = get_run_or_404(run_id)
+    video_dir = ROOT / "runtime" / "runs" / run["id"] / "video"
+    if not video_dir.is_dir():
+        raise HTTPException(404, "Video not found")
+    files = sorted(video_dir.glob("*.webm"))
+    if not files:
+        raise HTTPException(404, "Video not found")
+    return FileResponse(files[0], media_type="video/webm", filename=files[0].name)
+
+
+@app.get("/api/runs/{run_id}/step/{step_index}/screenshot")
+def get_run_step_screenshot(run_id: str, step_index: int) -> FileResponse:
+    get_run_or_404(run_id)
+    with db() as connection:
+        row = connection.execute("SELECT screenshot_path FROM run_steps WHERE run_id = ? AND step_index = ?", (run_id, step_index)).fetchone()
+    if not row or not row[0]:
+        raise HTTPException(404, "Step screenshot not found")
+    path = Path(row[0])
+    if not path.is_file():
+        raise HTTPException(404, "Step screenshot file missing")
+    return FileResponse(path, media_type="image/png", filename=path.name)
+
+
 run_controls: dict[str, dict[str, threading.Event]] = {}
 
 
@@ -706,6 +834,9 @@ def execution_progress(run_id: str, event: str, step_index: int, data: dict[str,
         with db() as connection:
             connection.execute("INSERT INTO run_steps (id, run_id, step_index, label, action_type, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (str(uuid.uuid4()), run_id, step_index, step.get("label"), step.get("type"), "running", timestamp))
         set_run(run_id, "running", current_step=step_index, current_action=step.get("label", step.get("type", "Browser action")), error=None)
+    elif event == "step_screenshot":
+        with db() as connection:
+            connection.execute("UPDATE run_steps SET screenshot_path = ? WHERE run_id = ? AND step_index = ?", (data.get("screenshot_path"), run_id, step_index))
     elif event == "step_completed":
         with db() as connection:
             connection.execute("UPDATE run_steps SET status = ?, completed_at = ?, url = ?, title = ?, verification = ? WHERE run_id = ? AND step_index = ?", ("completed", timestamp, data.get("url"), data.get("title"), json.dumps(data.get("verification")), run_id, step_index))
@@ -721,7 +852,11 @@ def execute_run(run_id: str, skill_id: str, variables: dict[str, str]) -> None:
     controls = run_controls.get(run_id, {"stop": threading.Event(), "pause": threading.Event()})
     try:
         skill = get_skill(skill_id)
-        executor = BrowserExecutor(ROOT / "runtime" / "runs" / run_id, lambda event, index, data: execution_progress(run_id, event, index, data), headless=False)
+        _headless = os.getenv("ACTIONPILOT_HEADLESS", "1") == "1"
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+            asyncio.set_event_loop(asyncio.new_event_loop())
+        executor = BrowserExecutor(ROOT / "runtime" / "runs" / run_id, lambda event, index, data: execution_progress(run_id, event, index, data), headless=_headless)
         outcomes = executor.execute(skill["steps"], variables, controls["stop"], controls["pause"])
         if controls["stop"].is_set():
             set_run(run_id, "stopped", current_action="Stopped by user")
@@ -737,7 +872,9 @@ def execute_run(run_id: str, skill_id: str, variables: dict[str, str]) -> None:
         set_run(run_id, "stopped", current_action="Stopped by user")
     except Exception as error:
         if not controls["stop"].is_set():
-            set_run(run_id, "failed", error=str(error), current_action="Failed")
+            import traceback
+            _tb = traceback.format_exc()
+            set_run(run_id, "failed", error=f"{type(error).__name__}: {error}" + chr(10) + _tb, current_action="Failed")
     finally:
         run_controls.pop(run_id, None)
 
@@ -763,13 +900,25 @@ def record_teaching_action(session_id: str, payload: TeachEvent) -> dict[str, An
     return {"recorded": True, "step_number": len(session["steps"]), "step": step}
 
 
+def _collapse_type_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    collapsed: list[dict[str, Any]] = []
+    for step in steps:
+        if (collapsed and step.get("type") == "type" and collapsed[-1].get("type") == "type"
+                and step.get("target") == collapsed[-1].get("target")):
+            collapsed[-1] = step
+            continue
+        collapsed.append(step)
+    return collapsed
+
+
 @app.post("/api/teach/{session_id}/finish")
 def finish_teaching(session_id: str) -> dict[str, Any]:
     session = teach_sessions.pop(session_id, None)
     if not session:
         raise HTTPException(404, "Teaching session not found")
-    domains = sorted({parsed.netloc for parsed in (urlparse(step.get("url", "")) for step in session["steps"]) if parsed.netloc})
-    return create_skill(SkillCreate(name=session["name"], description=session["description"], domains=domains, steps=[Step(**step) for step in session["steps"]]))
+    steps = _collapse_type_steps(session["steps"])
+    domains = sorted({parsed.netloc for parsed in (urlparse(step.get("url", "")) for step in steps) if parsed.netloc})
+    return create_skill(SkillCreate(name=session["name"], description=session["description"], domains=domains, steps=[Step(**step) for step in steps]))
 
 
 @app.post("/api/runs/{run_id}/pause")
