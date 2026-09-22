@@ -57,3 +57,13 @@
 .preview-frame img[data-missing="true"]{display:none}
 .preview-frame .preview-missing{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#7f938a;font-size:12px;background:#0b1012}
 .preview-frame img[data-missing="true"] + .preview-missing{display:flex}
+
+/* === Release polish: focus visibility, disabled states, button language === */
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid #8ce0ad;outline-offset:2px}
+.primary-button:disabled,.run-button:disabled{opacity:.45;cursor:not-allowed}
+.secondary-button:disabled{opacity:.55;cursor:not-allowed}
+.danger-button{border:1px solid #69423f;background:#2b1d1e;color:#ff9d9d;border-radius:6px;padding:9px 14px;font:600 12px 'DM Sans';cursor:pointer}
+.danger-button:hover{border-color:#ff9d9d}
+.danger-button:disabled{opacity:.5;cursor:not-allowed}
+.modal-actions{display:flex;gap:8px;margin-top:14px}
+.modal-actions>*{flex:1;justify-content:center}

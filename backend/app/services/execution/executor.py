@@ -134,7 +134,18 @@ class BrowserExecutor:
         if action_type == "click" or action_type == "submit":
             locator.click()
         elif action_type == "type":
-            locator.fill(value or "")
+            # Real keyboard input: focus the field, clear any existing value,
+            # then type character by character. locator.fill() does not emit
+            # keydown/keypress/keyup events, which React/Vue/Angular controlled
+            # inputs and validation libraries rely on. locator.type() emits
+            # the full event sequence.
+            locator.click()
+            try:
+                locator.press("Control+A")
+                locator.press("Delete")
+            except Exception:
+                pass
+            locator.type(value or "", delay=15)
         elif action_type == "press":
             locator.press(value or "Enter")
         elif action_type == "select":

@@ -1,1 +1,135 @@
-<!doctype html><html><head><meta charset="utf-8"><title>ActionPilot Recorder</title><style>body{width:250px;margin:0;padding:16px;background:#10161a;color:#e9f2ec;font:13px system-ui}h1{font-size:15px;margin:0 0 14px}p{color:#91a098;line-height:1.45}.status{padding:9px;background:#17231d;border-radius:6px;color:#9de2b3;margin:12px 0}.error{color:#ff9d9d;font-size:11px}.field{width:100%;box-sizing:border-box;margin:4px 0 10px;padding:8px;border:1px solid #32423a;border-radius:5px;background:#0b1012;color:#eef8f1}button{width:100%;border:0;border-radius:5px;padding:9px;background:#8ce0ad;color:#122018;font-weight:700;cursor:pointer}button.stop{background:#f0aaa4}.hidden{display:none}</style></head><body><h1>ActionPilot Recorder</h1><div id="status" class="status">Checking connection...</div><div id="setup"><input id="name" class="field" placeholder="Task name"><input id="description" class="field" placeholder="Description (optional)"><button id="start">Start Teaching</button></div><button id="stop" class="stop hidden">Stop Teaching</button><p id="error" class="error"></p><script type="module" src="dist/popup.js"></script></body></html>
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ActionPilot</title>
+<style>
+  :root {
+    --bg: #10161a;
+    --panel: #17231d;
+    --line: #32423a;
+    --text: #e9f2ec;
+    --muted: #91a098;
+    --mint: #8ce0ad;
+    --mint-ink: #122018;
+    --coral: #f0aaa4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    width: 276px;
+    margin: 0;
+    padding: 15px 16px 13px;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header { display: flex; align-items: center; gap: 10px; }
+  .logo { display: block; flex: none; border-radius: 6px; }
+  .name { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+  .tagline { margin: 9px 0 0; color: var(--muted); font-size: 11px; }
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 13px 0 4px;
+    padding: 9px 11px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .status::before {
+    content: "";
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--mint);
+  }
+  .status.recording { border-color: #4a5f55; background: #1b2a24; }
+  .status.recording::before { background: #ff8d7d; animation: pulse 1.2s ease-in-out infinite; }
+  .status.disconnected::before { background: #6b7a74; }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+  label {
+    display: block;
+    margin-top: 11px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  label span { font-weight: 400; color: #67766f; }
+  input {
+    display: block;
+    width: 100%;
+    margin-top: 5px;
+    padding: 9px 10px;
+    background: #0b1012;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--text);
+    font: 13px system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  input::placeholder { color: #5f6f68; }
+  input:focus-visible, button:focus-visible {
+    outline: 2px solid var(--mint);
+    outline-offset: 1px;
+  }
+  button {
+    width: 100%;
+    margin-top: 13px;
+    padding: 10px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--mint);
+    color: var(--mint-ink);
+    font: 700 13px system-ui, -apple-system, "Segoe UI", sans-serif;
+    cursor: pointer;
+  }
+  button:hover { filter: brightness(1.06); }
+  button.stop {
+    background: transparent;
+    border: 1px solid #6e4845;
+    color: var(--coral);
+  }
+  button.stop:hover { background: #2b1d1e; filter: none; }
+  .error { min-height: 14px; margin: 8px 0 0; color: #ff9d9d; font-size: 11px; }
+  footer {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+    color: #67766f;
+    font-size: 10px;
+    text-align: center;
+  }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+  <header>
+    <svg class="logo" width="26" height="26" viewBox="0 0 128 128" aria-hidden="true">
+      <rect width="128" height="128" rx="28" fill="#8CE0AD"/>
+      <path d="M44 34 L92 64 L44 94 Z" fill="#102118"/>
+      <circle cx="97" cy="31" r="10" fill="#F0655A"/>
+    </svg>
+    <span class="name">ActionPilot</span>
+  </header>
+  <p class="tagline">Record a browser workflow. Replay it locally.</p>
+
+  <div id="status" class="status connected">Checking connection...</div>
+
+  <div id="setup">
+    <label for="name">Task name</label>
+    <input id="name" placeholder="Demo Keyboard Search">
+    <label for="description">Description <span>(optional)</span></label>
+    <input id="description" placeholder="What this workflow does">
+    <button id="start">Start teaching</button>
+  </div>
+
+  <button id="stop" class="stop hidden">Stop teaching &amp; save</button>
+  <p id="error" class="error"></p>
+
+  <footer>Local-first &middot; No account &middot; No cloud</footer>
+  <script type="module" src="dist/popup.js"></script>
+</body>
+</html>

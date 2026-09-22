@@ -1,183 +1,210 @@
 # ActionPilot
 
-**Teach it once. Let it do the work.**
+**Record a browser workflow. Replay it locally.**
 
-ActionPilot is a local-first automation MVP. It stores reusable skills in SQLite, matches natural-language commands deterministically, extracts explicit variables, and keeps review and approval in the user's hands.
+![ActionPilot icon](extension/icons/icon128.png)
 
-**New to ActionPilot? Read [docs/USER_GUIDE.md](docs/USER_GUIDE.md).**
+ActionPilot is a local-first browser automation tool. You record a workflow once
+in your browser, save it as a reusable **Skill**, and replay it later — with the
+same data or with different values. Everything runs on your machine.
 
-## Current MVP
+**Full walkthrough:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
 
-- React + Vite command center with Skills, Teach, Runs, Connections, and Settings surfaces.
-- FastAPI + SQLite health check, skill CRUD, command matching, run creation, and audit records.
-- Real Chrome Manifest V3 teaching recorder with normalized target metadata.
-- Safe teaching flow with password, token, payment, and secret-field filtering.
-- Reviewable live timeline and SQLite-backed Skills.
-- Local demo shop with search, product detail, variant selection, and cart.
-- Natural-language skill matching with confidence, ambiguity handling, variable extraction, and plan preview.
+## What it does
 
-Gmail OAuth and desktop automation are intentionally staged next. Playwright replay and the focused natural-language agent are available without an AI key.
+- **Record** — teach a workflow in a real browser with the ActionPilot extension.
+- **Save Skill** — review every captured step, trim if needed, and save it locally.
+- **Replay** — run the Skill in Playwright Chromium, headless or visible.
+- **Inspect** — open Run Details: per-step screenshots, run video, and a timeline.
+- **Export** — download any Skill as a standalone Playwright `.spec.ts` test.
 
-## Setup on Windows
+## Why ActionPilot
+
+- **Runs locally** — backend, database, and replay runtime live on your machine.
+- **No account** — nothing to sign up for, nothing to log in to.
+- **No cloud** — Skills and runs are stored in a local SQLite file.
+- **No telemetry** — no analytics, tracking, or usage reporting.
+- **Reusable workflows** — record once, rerun with different values via variables.
+
+## Features
+
+- Browser workflow recording through a Manifest V3 extension (Chrome/Brave)
+- Reusable Skills stored in local SQLite
+- Variables with `{{name}}`-style placeholders
+- Replay with Playwright (pause, resume, stop)
+- Per-step screenshots
+- Run video recording
+- Run Details with a clickable step timeline
+- Wait and assert steps for reliability
+- Playwright test export (`.spec.ts`)
+- Delete confirmation for Skills
+- Sensitive-field filtering — password, token, payment, and secret fields are
+  never recorded
+
+## Quick Start
+
+Prerequisites: Windows, Python 3.11, Node.js, and a Chromium browser
+(Chrome or Brave).
+
+### 1. Install
+
+From the project root:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r backend\requirements.txt
-cd frontend
-npm install
+pip install -r backend/requirements.txt
+cd frontend; npm install; cd ..
+cd extension; npm install; npm run build; cd ..
 ```
 
-Run the API in one PowerShell terminal:
-
-```powershell
-cd backend
-..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
-```
-
-Run the frontend in another:
-
-```powershell
-cd frontend
-npm run dev
-```
-
-Open http://localhost:5173.
-
-Run the demo shop in a third PowerShell terminal:
-
-```powershell
-.\scripts\demo.ps1
-```
-
-Load the extension in Chrome:
-
-1. Run `cd extension; npm install; npm run build`.
-2. Open `chrome://extensions`.
-3. Enable **Developer mode**.
-4. Choose **Load unpacked**.
-5. Select the repository `extension` folder.
-6. Pin **ActionPilot Recorder** if desired.
-
-Teaching acceptance flow:
-
-1. Open `http://localhost:5173` and click **Teach a new task**.
-2. Name it `Demo Keyboard Search`, then start teaching.
-3. Open `http://127.0.0.1:4173`, search `keyboard`, open the product, select a variant, and add it to cart.
-4. Return to ActionPilot, stop teaching, review the live steps, and save the Skill.
-5. Open **Skills** and verify the recorded actions and domain are present.
-
-## Run your first skill
-
-Teach a workflow, save it, then choose **Run skill** from the Command or Skills view. ActionPilot creates a run, opens a local Chromium session with Playwright, executes each recorded action in order, and polls the run screen for progress. Use **Pause**, **Resume**, or **Stop** at any time. Failed actions stop the run and save a diagnostic screenshot under `runtime\runs\<run-id>`.
-
-For the local demo:
+### 2. Start the backend and frontend
 
 ```powershell
 .\scripts\dev.ps1
-.\scripts\demo.ps1
 ```
 
-Then teach the demo shop workflow and run it from **Skills**. The first real replay requires Chromium once:
+This opens the FastAPI backend at <http://127.0.0.1:8000> and the Vite
+frontend at <http://localhost:5173>.
+
+### 3. Load the browser extension
+
+1. Open `brave://extensions` (or `chrome://extensions`).
+2. Turn on **Developer mode**.
+3. Click **Load unpacked** and select this repository's `extension` folder.
+4. Pin **ActionPilot** to the toolbar.
+5. Open the popup — it should show **Ready to teach**.
+
+### 4. Run your first replay
 
 ```powershell
 python -m playwright install chromium
 ```
 
-## Environment
-
-Copy `.env.example` to `.env`. `AI_API_KEY`, `AI_BASE_URL`, and `AI_MODEL` are optional. Deterministic matching works without them. When configured, the optional OpenAI-compatible provider may return validated intent JSON only; it cannot execute code or bypass the existing executor and safety checks. Never commit `.env`, OAuth tokens, browser profiles, or the SQLite database.
-
-## Natural-language commands
-
-The command box normalizes a request, scores saved Skills by name, description, domain, and action metadata, extracts explicit variables, previews the plan, and sends approved work through the existing Playwright executor. For example:
-
-```text
-Run my keyboard workflow for a mouse
-Run Demo Keyboard Search with product = white keyboard
-```
-
-If multiple Skills are equally plausible, ActionPilot asks which Skill to run instead of guessing. It is a focused personal automation agent, not an unrestricted general computer agent.
-
-## Gmail setup
-
-Gmail is optional and requires a Google Cloud project:
-
-1. Create a project in [Google Cloud Console](https://console.cloud.google.com/).
-2. Enable **Gmail API** for the project.
-3. Configure the OAuth consent screen. For personal use, External testing mode is sufficient; add your Google account as a test user.
-4. Create an OAuth client under **APIs & Services > Credentials**. Use a Web application client and add `http://localhost:8000/api/gmail/callback` as an authorized redirect URI.
-5. Copy the client ID, client secret, and redirect URI into `.env`:
+### Optional: the local demo shop
 
 ```powershell
-GOOGLE_CLIENT_ID=your-client-id
-GOOGLE_CLIENT_SECRET=your-client-secret
-GOOGLE_REDIRECT_URI=http://localhost:8000/api/gmail/callback
+.\scripts\demo.ps1
 ```
 
-6. Start ActionPilot and open **Connections > Connect Gmail**. Google handles the login and consent screen; ActionPilot never receives or stores a Gmail password.
+Serves a local shop at <http://127.0.0.1:4173> for practicing recordings.
 
-The requested scopes are `gmail.readonly`, `gmail.compose`, `gmail.send`, and `gmail.modify`. OAuth tokens are stored only in the ignored local `runtime\gmail\token.json` file and are never returned to the frontend or written to audit logs. Email commands create a draft preview and always require an explicit **Send email** approval. Automated tests use a mocked Gmail API and do not require Google credentials.
-
-## Agent core and tools
-
-The command box is routed through a typed tool registry. The deterministic fallback selects:
-
-- `skill` for saved browser workflows, using the existing Playwright executor.
-- `gmail` for drafts, replies, and approved sends, using the existing Gmail service.
-- `web_research` for read-only public web search, visible text extraction, source collection, comparison, and content ideas.
-
-Agent plans are validated with Pydantic before execution. Research uses Playwright against public search results and returns cited titles and URLs. Mixed requests run research first, then stop before Gmail sending until the user explicitly approves. No tool accepts Python, PowerShell, shell commands, arbitrary Playwright code, or arbitrary Gmail instructions from an LLM.
-
-## Windows Desktop Control
-
-DesktopTool uses `pywinauto` with the Windows UI Automation backend and is registered alongside SkillTool, GmailTool, WebResearchTool, and BrowserTool. The initial application allowlist contains `notepad`, `explorer`, `chrome`, and `vscode`; application plans use these IDs rather than executable strings. Set `VSCODE_PATH` when the default `Code.exe` lookup is not available.
-
-Supported desktop actions are launch, focus, semantic click/double-click, ordinary text entry, key/hotkey input, scroll, wait, and screenshot. Observations are bounded to visible window/control metadata and a runtime screenshot. Text entry never records passwords, and runtime screenshots are excluded by `.gitignore`.
-
-High-risk desktop requests such as deletion, installers, system/security changes, publishing, or sending stop for explicit approval. The tool never accepts PowerShell, `cmd.exe`, Python, arbitrary shell commands, credential-store access, keylogging, or security bypass instructions. Desktop UI Automation may require an unlocked interactive Windows session; localized application titles are matched by stable UI Automation metadata where possible.
-
-## Unified visual computer use
-
-Browser and Windows observations are normalized through `ComputerObservation`, and proposed actions are validated as `ComputerAction` objects before reaching the existing BrowserTool or DesktopTool authorities. Semantic browser/UI Automation metadata is preferred; screenshots are bounded runtime artifacts and optional visual-model input. Visual targets require a confidence threshold and never bypass high-risk approval.
-
-The AgentLoop is bounded by `MAX_AGENT_STEPS` and recovery attempts. It can observe tool results, append validated next steps, retry recoverable failures, pause, stop, and wait for approval. The optional vision provider remains disabled without AI configuration; the semantic path works without a vision model.
-
-## Agent loop, memory, and routines
-
-Agent runs use a bounded Observe -> Plan -> Risk Check -> Act -> Observe loop. `MAX_AGENT_STEPS` defaults to `15`; risky steps stop in `waiting_confirmation`, and stop/pause controls remain available through the existing Run system. Agent state includes the goal, plan, observations, variables, tool history, result, and status.
-
-Explicit preferences can be saved under **Memory** and are included in later agent results when relevant. **Routines** store a name, prompt, schedule, and enabled state; **Run now** invokes the same Agent Loop and never bypasses Gmail or other high-risk approval gates. Memory is intentionally small SQLite CRUD, not a vector database or silent personal profile.
-
-Useful agent endpoints:
+## How it works
 
 ```text
-POST /api/agent/run
-GET  /api/agent/runs/{id}
-POST /api/agent/runs/{id}/pause
-POST /api/agent/runs/{id}/resume
-POST /api/agent/runs/{id}/stop
-GET/POST/PUT/DELETE /api/memory
-GET/POST/PUT/DELETE /api/routines
-POST /api/routines/{id}/run
+Browser extension  →  FastAPI + SQLite  →  Playwright runtime  →  Run Details
+   (record actions)     (store Skills)       (replay steps)      (screenshots,
+                                                                  video, timeline)
 ```
 
-## Security boundary
+The extension captures normalized browser actions and sends them to the local
+API. Skills are stored in `actionpilot.db`. Replay runs each step through
+Playwright and writes screenshots and video under `runtime/runs/<run-id>/`.
 
-ActionPilot is not an unrestricted agent. The planned execution layer must use an allowlist, bounded retries, emergency stop, secret-field filtering, and explicit approval for high-risk actions such as sending, purchasing, deleting, or publishing.
+## Recording a Skill
 
-## Development checks
+1. Start the backend and frontend, then open <http://localhost:5173>.
+2. Click **Teach** (sidebar) or **Teach a new task**, enter a task name, and
+   click **Start teaching**.
+3. In your browser, start from a blank tab and navigate to the site you want to
+   automate — this becomes the Skill's first step.
+4. Perform the workflow: click real controls, type values, submit forms.
+5. Click the **ActionPilot** toolbar icon and choose **Stop teaching & save**.
+6. Review the captured steps in the review modal, remove any noise, and click
+   **Save skill**.
+
+Tips:
+
+- Click only meaningful elements (buttons, links, inputs, selects).
+- Password, token, and secret fields are skipped automatically.
+- To use a variable, type the placeholder literally during recording, e.g.
+  `{{name}}`.
+
+## Replaying a Skill
+
+1. Open **Skills** in the sidebar.
+2. Click **Run** on a Skill.
+3. If the Skill contains placeholders, fill in the values when asked.
+4. Watch the run on the **Runs** page — pause, resume, or stop at any time.
+5. When it finishes, click any step to see its screenshot and jump the video to
+   that moment. Failed runs highlight the failing step and show the exact error.
+
+Screenshots and video are saved under `runtime/runs/<run-id>/`.
+
+## Variables
+
+Variables make a Skill reusable with different data.
+
+1. During recording, type a placeholder **literally** into a form field:
+   `{{name}}`, `{{email}}`, `{{message}}`.
+2. Save the Skill.
+3. On **Run**, ActionPilot detects the placeholders and asks for values.
+4. Each run stores its values and shows them in the run record.
+
+The braces are required — on a US keyboard, `{` is Shift+[ and `}` is Shift+].
+
+## Exporting Playwright tests
+
+1. Open **Skills**.
+2. Click **Playwright** on a Skill — your browser downloads
+   `<skill-name>.spec.ts`.
+3. Run it standalone:
 
 ```powershell
-python -m py_compile backend\app\main.py
-cd frontend
-npm run build
+npx playwright test <skill-name>.spec.ts --project=chromium
 ```
 
-## Roadmap
+The export uses real Playwright APIs (`page.goto`, `getByRole`, `getByLabel`,
+`expect(...).toBeVisible()`) and runs in a fresh browser outside ActionPilot.
+Placeholders like `{{name}}` are preserved so you can substitute them with your
+own fixtures.
 
-1. Chrome MV3 recorder and local bridge.
-2. Playwright execution engine with locator priority and screenshots on failure.
-3. Real run state machine with pause, resume, stop, and approval gates.
-4. Gmail OAuth draft/send flow.
-5. Local demo shop and end-to-end automation tests.
+## Project structure
+
+```text
+extension/   Manifest V3 recorder (TypeScript, esbuild)
+frontend/    React + Vite UI
+backend/     FastAPI server, SQLite storage, Playwright executor
+docs/        User guide
+demo-site/   Local demo shop and form pages
+scripts/     dev.ps1 (start app), demo.ps1 (start demo shop)
+runtime/     Run artifacts: screenshots and video (git-ignored)
+```
+
+## Privacy
+
+- **Local-first:** Skills, runs, and audit records live in `actionpilot.db` and
+  `runtime/` on your machine.
+- **No account, no cloud, no telemetry:** no sign-in, no sync, no analytics.
+- **Recording is filtered:** password, token, payment, and secret fields are
+  never captured. Cookies, credentials, and browser storage are never read.
+- **Network:** the app talks to your local backend and to the sites you choose
+  to run against. The UI loads its two fonts from Google Fonts (typography
+  only; no data is sent beyond the font request).
+
+## Limitations
+
+- **Chromium-based recording and replay.** The extension targets Chrome/Brave;
+  replay runs in Playwright Chromium. Other browsers are not supported or
+  verified.
+- **No CAPTCHA or bot-check bypass.** Sites behind Cloudflare or reCAPTCHA may
+  not complete.
+- **Wait/assert steps have no UI yet.** Author them by editing the Skill JSON
+  via the API (see the user guide).
+- **No conditional logic** (if/else) inside Skills.
+- **One run at a time.**
+- **Selector drift:** steps are recorded from the live DOM; heavily dynamic
+  sites may need re-recording.
+- **No scheduler** — runs start when you click Run.
+- **No Skill JSON import.** Playwright test export is available; Skill
+  import/export as JSON is not.
+- **Local-only** — no cloud sync, accounts, or sharing.
+
+## Status
+
+ActionPilot is a **local-first v0.1 release candidate** covering the
+record → save → replay → inspect → export workflow on Windows.
+
+The repository also contains experimental integrations (Gmail, web research,
+desktop control, memory, and routines) that are **not part of this release's
+verified workflow** and may change without notice.

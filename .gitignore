@@ -24,4 +24,5 @@ runtime/
 
 # Session backups created during development
 *.bak*
+backups/
 
