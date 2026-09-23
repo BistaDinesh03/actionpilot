@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,12 +15,13 @@ from fastapi import FastAPI, HTTPException
 import asyncio, sys
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .services.execution.executor import BrowserExecutor, ConfirmationRequired, ExecutionStopped
+from .services.execution.run_state import TERMINAL_RUN_STATUSES, InvalidTransition, validate_transition
 from .services.agent.agent import ActionPilotAgent
 from .services.agent.loop import AgentLoop
 from .services.agent.memory import MemoryStore
@@ -102,6 +104,17 @@ def init_db() -> None:
                 url TEXT,
                 title TEXT,
                 verification TEXT
+            );
+            CREATE TABLE IF NOT EXISTS approvals (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                step_index INTEGER NOT NULL DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'step',
+                summary TEXT NOT NULL DEFAULT '',
+                detail TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                resolved_at TEXT
             );
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id TEXT PRIMARY KEY,
@@ -509,13 +522,12 @@ def agent_tools() -> dict[str, Any]:
     return {"tools": agent_registry.descriptions()}
 
 
-agent_run_controls: dict[str, dict[str, threading.Event]] = {}
-
-
 def current_agent_plan(request: str, variables: dict[str, str] | None = None) -> AgentPlan:
     with db() as connection:
         skills = [skill_from_row(row) for row in connection.execute("SELECT * FROM skills")]
-    return calculate_risk(actionpilot_agent.plan(AgentRequest(request=request, variables=variables or {}), skills))
+    plan = calculate_risk(actionpilot_agent.plan(AgentRequest(request=request, variables=variables or {}), skills))
+    write_audit("agent_planned", request)
+    return plan
 
 
 @app.post("/api/agent/plan")
@@ -523,18 +535,17 @@ def agent_plan(payload: AgentRequest) -> dict[str, Any]:
     return current_agent_plan(payload.request, payload.variables).model_dump()
 
 
-def run_agent_request(payload: AgentRequest) -> dict[str, Any]:
-    plan = current_agent_plan(payload.request, payload.variables)
+def run_agent_request(payload: AgentRequest, plan: AgentPlan | None = None) -> dict[str, Any]:
+    plan = plan or current_agent_plan(payload.request, payload.variables)
     if plan.intent == "run_skill" and plan.steps:
         step = plan.steps[0]
         run = create_run(RunCreate(skill_id=str(step.parameters["skill_id"]), task_name=plan.request[:120], variables=plan.variables))
         return {"run_id": run["id"], "status": "running", "state": {"goal": plan.request, "plan": plan.model_dump(), "tool_history": [{"tool": "skill", "action": step.action}]}}
-    state = agent_loop.run(plan.request, [], plan.variables)
-    preferences = memory_store.relevant(plan.request)
-    if preferences:
-        state.result = {**(state.result or {}), "memory_preferences": preferences}
-    run = create_agent_run(plan, state.status, state.model_dump())
-    return {"run_id": run["id"], "status": state.status, "state": state.model_dump()}
+    run_id = create_pending_agent_run(plan)
+    run_controls[run_id] = {"stop": threading.Event(), "pause": threading.Event()}
+    threading.Thread(target=execute_agent_run, args=(run_id, plan.request, plan.variables), daemon=True).start()
+    write_audit("agent_run_started", plan.request)
+    return {"run_id": run_id, "status": "queued", "state": {"goal": plan.request, "plan": plan.model_dump(), "tool_history": []}}
 
 
 @app.post("/api/agent/run")
@@ -549,23 +560,17 @@ def agent_run_detail(run_id: str) -> dict[str, Any]:
 
 @app.post("/api/agent/runs/{run_id}/pause")
 def agent_pause(run_id: str) -> dict[str, Any]:
-    set_run(run_id, "paused", current_action="Paused by user")
-    return get_run_or_404(run_id)
+    return pause_run(run_id)
 
 
 @app.post("/api/agent/runs/{run_id}/resume")
 def agent_resume(run_id: str) -> dict[str, Any]:
-    set_run(run_id, "running", current_action="Resuming")
-    return get_run_or_404(run_id)
+    return resume_run(run_id)
 
 
 @app.post("/api/agent/runs/{run_id}/stop")
 def agent_stop(run_id: str) -> dict[str, Any]:
-    controls = agent_run_controls.get(run_id)
-    if controls:
-        controls["stop"].set()
-    set_run(run_id, "stopped", current_action="Stopped by user")
-    return get_run_or_404(run_id)
+    return stop_run(run_id)
 
 
 @app.get("/api/memory")
@@ -575,7 +580,9 @@ def memory_list() -> list[dict[str, Any]]:
 
 @app.post("/api/memory", status_code=201)
 def memory_create(payload: MemoryRequest) -> dict[str, Any]:
-    return memory_store.create(payload.type, payload.title, payload.value)
+    item = memory_store.create(payload.type, payload.title, payload.value)
+    write_audit("memory_created", f"{payload.type}: {payload.title}")
+    return item
 
 
 @app.put("/api/memory/{memory_id}")
@@ -583,6 +590,7 @@ def memory_update(memory_id: str, payload: MemoryRequest) -> dict[str, Any]:
     item = memory_store.update(memory_id, payload.title, payload.value, payload.type)
     if not item:
         raise HTTPException(404, "Memory not found")
+    write_audit("memory_updated", payload.title)
     return item
 
 
@@ -590,6 +598,7 @@ def memory_update(memory_id: str, payload: MemoryRequest) -> dict[str, Any]:
 def memory_delete(memory_id: str) -> dict[str, bool]:
     if not memory_store.delete(memory_id):
         raise HTTPException(404, "Memory not found")
+    write_audit("memory_deleted", memory_id)
     return {"deleted": True}
 
 
@@ -600,7 +609,9 @@ def routine_list() -> list[dict[str, Any]]:
 
 @app.post("/api/routines", status_code=201)
 def routine_create(payload: RoutineRequest) -> dict[str, Any]:
-    return routine_store.create(payload.name, payload.prompt, payload.schedule, payload.enabled)
+    routine = routine_store.create(payload.name, payload.prompt, payload.schedule, payload.enabled)
+    write_audit("routine_created", payload.name)
+    return routine
 
 
 @app.put("/api/routines/{routine_id}")
@@ -608,6 +619,7 @@ def routine_update(routine_id: str, payload: RoutineRequest) -> dict[str, Any]:
     item = routine_store.update(routine_id, payload.name, payload.prompt, payload.schedule, payload.enabled)
     if not item:
         raise HTTPException(404, "Routine not found")
+    write_audit("routine_updated", payload.name)
     return item
 
 
@@ -615,6 +627,7 @@ def routine_update(routine_id: str, payload: RoutineRequest) -> dict[str, Any]:
 def routine_delete(routine_id: str) -> dict[str, bool]:
     if not routine_store.delete(routine_id):
         raise HTTPException(404, "Routine not found")
+    write_audit("routine_deleted", routine_id)
     return {"deleted": True}
 
 
@@ -625,6 +638,7 @@ def routine_run(routine_id: str) -> dict[str, Any]:
         raise HTTPException(404, "Routine not found")
     result = run_agent_request(AgentRequest(request=routine["prompt"]))
     routine_store.mark_run(routine_id)
+    write_audit("routine_run", routine["name"])
     return result
 
 
@@ -654,6 +668,9 @@ def agent_execute(payload: AgentExecuteRequest) -> dict[str, Any]:
         step = plan.steps[0]
         run = create_run(RunCreate(skill_id=str(step.parameters["skill_id"]), task_name=plan.request[:120], variables=plan.variables))
         return {"status": "started", "run_id": run["id"], "tool": "skill"}
+    if plan.intent == "local_account":
+        # Deterministic local demo flow: run in the background and report live progress.
+        return run_agent_request(payload, plan)
     if plan.intent in {"web_research", "research_and_email"}:
         tool = agent_registry.get("web_research")
         research_step = next(step for step in plan.steps if step.tool == "web_research")
@@ -684,7 +701,7 @@ def agent_execute(payload: AgentExecuteRequest) -> dict[str, Any]:
 @app.post("/api/command")
 def command(payload: CommandRequest) -> dict[str, Any]:
     agent_plan = current_agent_plan(payload.command)
-    if agent_plan.intent in {"web_research", "research_and_email", "desktop"}:
+    if agent_plan.intent in {"web_research", "research_and_email", "desktop", "local_account"}:
         result = agent_plan.model_dump()
         result["matched"] = True
         result["agent_plan"] = result.copy()
@@ -741,7 +758,7 @@ def create_run(payload: RunCreate) -> dict[str, Any]:
     task_name = payload.task_name or skill["name"]
     run = {"id": str(uuid.uuid4()), "skill_id": payload.skill_id, "task_name": task_name, "status": "queued", "current_step": 0, "current_action": "Starting browser", "logs": ["Plan created. Starting browser."], "created_at": now(), "variables": payload.variables, "steps": []}
     with db() as connection:
-        connection.execute("INSERT INTO runs (id, skill_id, task_name, status, current_step, logs, created_at, variables) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (run["id"], payload.skill_id, task_name, run["status"], 0, json.dumps(run["logs"]), run["created_at"], json.dumps(payload.variables)))
+        connection.execute("INSERT INTO runs (id, skill_id, task_name, status, current_step, logs, created_at, variables, plan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (run["id"], payload.skill_id, task_name, run["status"], 0, json.dumps(run["logs"]), run["created_at"], json.dumps(payload.variables), json.dumps(skill["steps"])))
     run_controls[run["id"]] = {"stop": threading.Event(), "pause": threading.Event()}
     threading.Thread(target=execute_run, args=(run["id"], payload.skill_id, payload.variables), daemon=True).start()
     write_audit("run_created", task_name)
@@ -770,7 +787,7 @@ def get_run_screenshot(run_id: str) -> FileResponse:
 
 
 @app.get("/api/runs/{run_id}/video")
-def get_run_video(run_id: str) -> FileResponse:
+def get_run_video(run_id: str):
     run = get_run_or_404(run_id)
     video_dir = ROOT / "runtime" / "runs" / run["id"] / "video"
     if not video_dir.is_dir():
@@ -778,6 +795,14 @@ def get_run_video(run_id: str) -> FileResponse:
     files = sorted(video_dir.glob("*.webm"))
     if not files:
         raise HTTPException(404, "Video not found")
+    # The recorder may still be writing (or have produced no bytes yet).
+    # Starlette's FileResponse answers `Range: bytes=0-` on an empty file with
+    # HTTP 416, which surfaces as a console error in the <video> element.
+    # Serve an empty 200 body instead: no fabricated data, no 416, and the
+    # player simply reports "no data". Non-empty files keep normal Range
+    # behaviour (200/206) via FileResponse.
+    if files[0].stat().st_size == 0:
+        return Response(content=b"", media_type="video/webm", headers={"Content-Length": "0"})
     return FileResponse(files[0], media_type="video/webm", filename=files[0].name)
 
 
@@ -824,7 +849,19 @@ def set_run(run_id: str, status: str, **fields: Any) -> None:
         values.append(value)
     values.append(run_id)
     with db() as connection:
+        row = connection.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            return
+        validate_transition(row["status"], status)
         connection.execute(f"UPDATE runs SET {', '.join(assignments)} WHERE id = ?", values)
+
+
+def safe_set_run(run_id: str, status: str, **fields: Any) -> None:
+    """Best-effort status write for background threads: skips races with terminal states."""
+    try:
+        set_run(run_id, status, **fields)
+    except InvalidTransition:
+        pass
 
 
 def execution_progress(run_id: str, event: str, step_index: int, data: dict[str, Any]) -> None:
@@ -833,7 +870,7 @@ def execution_progress(run_id: str, event: str, step_index: int, data: dict[str,
         step = data["step"]
         with db() as connection:
             connection.execute("INSERT INTO run_steps (id, run_id, step_index, label, action_type, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (str(uuid.uuid4()), run_id, step_index, step.get("label"), step.get("type"), "running", timestamp))
-        set_run(run_id, "running", current_step=step_index, current_action=step.get("label", step.get("type", "Browser action")), error=None)
+        safe_set_run(run_id, "running", current_step=step_index, current_action=step.get("label", step.get("type", "Browser action")), error=None)
     elif event == "step_screenshot":
         with db() as connection:
             connection.execute("UPDATE run_steps SET screenshot_path = ? WHERE run_id = ? AND step_index = ?", (data.get("screenshot_path"), run_id, step_index))
@@ -843,9 +880,9 @@ def execution_progress(run_id: str, event: str, step_index: int, data: dict[str,
     elif event == "step_failed":
         with db() as connection:
             connection.execute("UPDATE run_steps SET status = ?, completed_at = ?, error = ?, screenshot_path = ?, url = ?, title = ? WHERE run_id = ? AND step_index = ?", ("failed", timestamp, data.get("error"), data.get("screenshot_path"), data.get("url"), data.get("title"), run_id, step_index))
-        set_run(run_id, "failed", error=data.get("error"), screenshot_path=data.get("screenshot_path"))
+        safe_set_run(run_id, "failed", error=data.get("error"), screenshot_path=data.get("screenshot_path"))
     elif event == "waiting_confirmation":
-        set_run(run_id, "waiting_confirmation", current_step=step_index, current_action="Confirmation required", error=data.get("message"))
+        safe_set_run(run_id, "waiting_confirmation", current_step=step_index, current_action="Confirmation required", error=data.get("message"))
 
 
 def execute_run(run_id: str, skill_id: str, variables: dict[str, str]) -> None:
@@ -857,24 +894,24 @@ def execute_run(run_id: str, skill_id: str, variables: dict[str, str]) -> None:
             asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
             asyncio.set_event_loop(asyncio.new_event_loop())
         executor = BrowserExecutor(ROOT / "runtime" / "runs" / run_id, lambda event, index, data: execution_progress(run_id, event, index, data), headless=_headless)
-        outcomes = executor.execute(skill["steps"], variables, controls["stop"], controls["pause"])
+        outcomes = executor.execute(skill["steps"], variables, controls["stop"], controls["pause"], gate=approval_gate(run_id, controls))
         if controls["stop"].is_set():
-            set_run(run_id, "stopped", current_action="Stopped by user")
+            safe_set_run(run_id, "stopped", current_action="Stopped by user")
         elif outcomes:
-            set_run(run_id, "completed", current_step=len(outcomes), current_action="Complete")
+            safe_set_run(run_id, "completed", current_step=len(outcomes), current_action="Complete")
             with db() as connection:
                 connection.execute("UPDATE skills SET runs = runs + 1, usage_count = usage_count + 1, last_run = ?, success_rate = CASE WHEN runs = 0 THEN 100 ELSE ((success_rate * runs) + 100) / (runs + 1) END WHERE id = ?", (now(), skill_id))
         else:
-            set_run(run_id, "completed", current_action="Complete")
+            safe_set_run(run_id, "completed", current_action="Complete")
     except ConfirmationRequired as error:
-        set_run(run_id, "waiting_confirmation", error=str(error), current_action="Confirmation required")
-    except ExecutionStopped:
-        set_run(run_id, "stopped", current_action="Stopped by user")
+        safe_set_run(run_id, "waiting_confirmation", error=str(error), current_action="Confirmation required")
+    except ExecutionStopped as error:
+        safe_set_run(run_id, "stopped", current_action=str(error) or "Stopped by user")
     except Exception as error:
         if not controls["stop"].is_set():
             import traceback
             _tb = traceback.format_exc()
-            set_run(run_id, "failed", error=f"{type(error).__name__}: {error}" + chr(10) + _tb, current_action="Failed")
+            safe_set_run(run_id, "failed", error=f"{type(error).__name__}: {error}" + chr(10) + _tb, current_action="Failed")
     finally:
         run_controls.pop(run_id, None)
 
@@ -923,30 +960,252 @@ def finish_teaching(session_id: str) -> dict[str, Any]:
 
 @app.post("/api/runs/{run_id}/pause")
 def pause_run(run_id: str) -> dict[str, Any]:
-    get_run_or_404(run_id)
+    run = get_run_or_404(run_id)
+    if run["status"] in TERMINAL_RUN_STATUSES or run["status"] == "paused":
+        return run
     controls = run_controls.get(run_id)
     if controls:
         controls["pause"].set()
-    set_run(run_id, "paused", current_action="Paused by user")
+    try:
+        set_run(run_id, "paused", current_action="Paused by user")
+    except InvalidTransition as error:
+        raise HTTPException(409, str(error)) from error
+    write_audit("run_paused", run["task_name"])
     return get_run_or_404(run_id)
 
 
 @app.post("/api/runs/{run_id}/resume")
 def resume_run(run_id: str) -> dict[str, Any]:
-    get_run_or_404(run_id)
+    run = get_run_or_404(run_id)
+    if run["status"] in TERMINAL_RUN_STATUSES or run["status"] == "running":
+        return run
     controls = run_controls.get(run_id)
     if controls:
         controls["pause"].clear()
-    set_run(run_id, "running", current_action="Resuming")
+    try:
+        set_run(run_id, "running", current_action="Resuming")
+    except InvalidTransition as error:
+        raise HTTPException(409, str(error)) from error
+    write_audit("run_resumed", run["task_name"])
     return get_run_or_404(run_id)
 
 
 @app.post("/api/runs/{run_id}/stop")
 def stop_run(run_id: str) -> dict[str, Any]:
-    get_run_or_404(run_id)
+    run = get_run_or_404(run_id)
+    if run["status"] in TERMINAL_RUN_STATUSES:
+        return run
     controls = run_controls.get(run_id)
     if controls:
         controls["stop"].set()
-    write_audit("run_stopped", run_id)
-    set_run(run_id, "stopped", current_action="Stopped by user")
+    try:
+        set_run(run_id, "stopped", current_action="Stopped by user")
+    except InvalidTransition as error:
+        raise HTTPException(409, str(error)) from error
+    write_audit("run_stopped", run["task_name"])
     return get_run_or_404(run_id)
+
+
+def approval_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    approval = dict(row)
+    approval["detail"] = json.loads(approval.get("detail") or "{}")
+    return approval
+
+
+def create_approval(run_id: str, step_index: int, summary: str, detail: dict[str, Any]) -> str:
+    approval_id = str(uuid.uuid4())
+    with db() as connection:
+        connection.execute(
+            "INSERT INTO approvals (id, run_id, step_index, kind, summary, detail, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (approval_id, run_id, step_index, "step", summary, json.dumps(detail), "pending", now()),
+        )
+    return approval_id
+
+
+def approval_status(approval_id: str) -> str | None:
+    with db() as connection:
+        row = connection.execute("SELECT status FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+    return str(row["status"]) if row else None
+
+
+def approval_gate(run_id: str, controls: dict[str, threading.Event]):
+    """Blocks a high-risk step until its approval row is resolved or the run stops."""
+
+    def gate(index: int, step: dict[str, Any]) -> str | None:
+        summary = str(step.get("label") or step.get("action") or "High-risk action")
+        approval_id = create_approval(run_id, index, summary, step)
+        safe_set_run(run_id, "waiting_confirmation", current_step=index, current_action="Waiting for approval", error=None)
+        write_audit("approval_requested", f"step {index + 1}: {summary}")
+        while True:
+            if controls["stop"].is_set():
+                return "Run stopped by user"
+            status = approval_status(approval_id)
+            if status == "approved":
+                return None
+            if status == "rejected":
+                return "Approval rejected"
+            time.sleep(0.1)
+
+    return gate
+
+
+@app.get("/api/activity")
+def activity(limit: int = 100) -> list[dict[str, Any]]:
+    bounded = max(1, min(limit, 500))
+    with db() as connection:
+        rows = connection.execute("SELECT * FROM audit_logs ORDER BY created_at DESC, rowid DESC LIMIT ?", (bounded,)).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.get("/api/approvals")
+def list_approvals(status: str | None = None, run_id: str | None = None) -> list[dict[str, Any]]:
+    if status is not None and status not in {"pending", "approved", "rejected"}:
+        raise HTTPException(400, "status must be pending, approved, or rejected")
+    query = "SELECT * FROM approvals"
+    clauses: list[str] = []
+    values: list[Any] = []
+    if status:
+        clauses.append("status = ?")
+        values.append(status)
+    if run_id:
+        clauses.append("run_id = ?")
+        values.append(run_id)
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY created_at DESC, rowid DESC"
+    with db() as connection:
+        rows = connection.execute(query, values).fetchall()
+    return [approval_from_row(row) for row in rows]
+
+
+def _resolve_approval(approval_id: str, decision: str) -> dict[str, Any]:
+    with db() as connection:
+        row = connection.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Approval not found")
+        updated = connection.execute(
+            "UPDATE approvals SET status = ?, resolved_at = ? WHERE id = ? AND status = 'pending'",
+            (decision, now(), approval_id),
+        )
+        if updated.rowcount == 0:
+            raise HTTPException(409, "Approval has already been resolved")
+        approval = approval_from_row(connection.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone())
+        run_row = connection.execute("SELECT status FROM runs WHERE id = ?", (approval["run_id"],)).fetchone()
+    if run_row and run_row["status"] == "waiting_confirmation":
+        if decision == "approved":
+            safe_set_run(approval["run_id"], "running", current_action="Approved - resuming")
+        else:
+            safe_set_run(approval["run_id"], "stopped", current_action="Approval rejected")
+    return approval
+
+
+@app.post("/api/approvals/{approval_id}/approve")
+def approve_approval(approval_id: str) -> dict[str, Any]:
+    approval = _resolve_approval(approval_id, "approved")
+    write_audit("approval_approved", f"step {approval['step_index'] + 1}: {approval['summary']}")
+    return approval
+
+
+@app.post("/api/approvals/{approval_id}/reject")
+def reject_approval(approval_id: str) -> dict[str, Any]:
+    approval = _resolve_approval(approval_id, "rejected")
+    write_audit("approval_rejected", f"step {approval['step_index'] + 1}: {approval['summary']}")
+    return approval
+
+
+def create_pending_agent_run(plan: AgentPlan) -> str:
+    run_id = str(uuid.uuid4())
+    created = now()
+    with db() as connection:
+        connection.execute(
+            "INSERT INTO runs (id, skill_id, task_name, status, current_step, logs, created_at, variables, current_action, tool, plan, output, requires_confirmation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (run_id, None, plan.request[:120], "queued", 0, json.dumps([step.action for step in plan.steps]), created, json.dumps(plan.variables), "Planning", plan.steps[0].tool if plan.steps else None, plan.model_dump_json(), json.dumps({}), int(plan.requires_confirmation)),
+        )
+        for index, step in enumerate(plan.steps):
+            connection.execute(
+                "INSERT INTO run_steps (id, run_id, step_index, label, action_type, status, started_at) VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                (str(uuid.uuid4()), run_id, index, step.action, step.tool, "pending"),
+            )
+    return run_id
+
+
+def agent_progress(run_id: str, event: str, step_index: int, data: dict[str, Any]) -> None:
+    timestamp = now()
+    step = data.get("step") or {}
+    label = step.get("label") or step.get("action") or "Agent action"
+    action_type = step.get("type") or step.get("tool") or "agent"
+    if event == "step_started":
+        with db() as connection:
+            updated = connection.execute(
+                "UPDATE run_steps SET label = ?, action_type = ?, status = ?, started_at = ? WHERE run_id = ? AND step_index = ?",
+                (label, action_type, "running", timestamp, run_id, step_index),
+            )
+            if updated.rowcount == 0:
+                connection.execute(
+                    "INSERT INTO run_steps (id, run_id, step_index, label, action_type, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (str(uuid.uuid4()), run_id, step_index, label, action_type, "running", timestamp),
+                )
+        safe_set_run(run_id, "running", current_step=step_index, current_action=label, error=None)
+        write_audit("agent_step_started", label)
+    elif event == "step_completed":
+        output = data.get("output") or {}
+        verification = output.get("verification")
+        with db() as connection:
+            connection.execute(
+                "UPDATE run_steps SET status = ?, completed_at = ?, url = COALESCE(?, url), title = COALESCE(?, title), screenshot_path = COALESCE(?, screenshot_path), verification = COALESCE(?, verification) WHERE run_id = ? AND step_index = ?",
+                ("completed", timestamp, output.get("url"), output.get("title"), output.get("screenshot_path"), json.dumps(verification) if verification is not None else None, run_id, step_index),
+            )
+        write_audit("agent_step_completed", label)
+    elif event == "step_failed":
+        output = data.get("output") or {}
+        verification = output.get("verification")
+        with db() as connection:
+            connection.execute(
+                "UPDATE run_steps SET status = ?, completed_at = ?, error = ?, url = COALESCE(?, url), title = COALESCE(?, title), screenshot_path = COALESCE(?, screenshot_path), verification = COALESCE(?, verification) WHERE run_id = ? AND step_index = ?",
+                ("failed", timestamp, data.get("error"), output.get("url"), output.get("title"), output.get("screenshot_path"), json.dumps(verification) if verification is not None else None, run_id, step_index),
+            )
+        safe_set_run(run_id, "failed", error=data.get("error"), current_action="Failed")
+        write_audit("agent_step_failed", label)
+    elif event == "waiting_approval":
+        with db() as connection:
+            connection.execute("UPDATE run_steps SET status = ? WHERE run_id = ? AND step_index = ?", ("waiting_confirmation", run_id, step_index))
+        safe_set_run(run_id, "waiting_confirmation", current_step=step_index, current_action="Waiting for approval", error=None)
+
+
+def execute_agent_run(run_id: str, request: str, variables: dict[str, str]) -> None:
+    controls = run_controls.get(run_id) or {"stop": threading.Event(), "pause": threading.Event()}
+    try:
+        state = agent_loop.run(
+            request,
+            [],
+            variables,
+            stop_event=controls["stop"],
+            pause_event=controls["pause"],
+            gate=approval_gate(run_id, controls),
+            progress=lambda event, index, data: agent_progress(run_id, event, index, data),
+        )
+        preferences = memory_store.relevant(request)
+        if preferences:
+            state.result = {**(state.result or {}), "memory_preferences": preferences}
+        with db() as connection:
+            connection.execute("UPDATE runs SET output = ? WHERE id = ?", (json.dumps(state.model_dump()), run_id))
+        final_action = {
+            "completed": "Complete",
+            "failed": "Failed",
+            "stopped": state.error or "Stopped by user",
+            "waiting_confirmation": "Waiting for approval",
+        }.get(state.status, state.status)
+        safe_set_run(run_id, state.status, current_step=state.current_step, current_action=final_action, error=state.error)
+        write_audit("agent_run_finished", f"{state.status}: {request[:120]}")
+    except Exception as error:
+        import traceback
+        _tb = traceback.format_exc()
+        if not controls["stop"].is_set():
+            safe_set_run(run_id, "failed", error=f"{type(error).__name__}: {error}" + chr(10) + _tb, current_action="Failed")
+        write_audit("agent_run_finished", f"failed: {request[:120]}")
+    finally:
+        try:
+            agent_registry.get("browser").close_sessions(threading.get_ident())
+        except Exception:
+            pass
+        run_controls.pop(run_id, None)

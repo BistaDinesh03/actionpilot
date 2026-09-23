@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ActionPilot Demo — Create Test Account</title>
+<style>
+  :root { --ink:#17231d; --muted:#68736b; --line:#d9d5cb; --paper:#fff; --bg:#f5f1e8; --accent:#2b8a4b; --accent-dark:#216b3b; --error:#b3352c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:480px; margin:0 auto; padding:32px 20px 48px; }
+  header { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+  header h1 { font-size:20px; margin:0; }
+  .badge { font-size:11px; font-weight:700; letter-spacing:.08em; background:#e7efe9; color:var(--accent-dark); border:1px solid #bcd6c4; border-radius:999px; padding:3px 9px; }
+  .sub { margin:0 0 20px; color:var(--muted); font-size:13px; }
+  form, .result { background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:22px; }
+  .field { margin-bottom:16px; }
+  label, legend { display:block; font-size:13px; font-weight:600; margin-bottom:6px; padding:0; }
+  input[type=text], input[type=email], select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:7px; font:15px system-ui; background:#fff; color:var(--ink); }
+  input:focus-visible, select:focus-visible, button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  fieldset { border:0; margin:0 0 16px; padding:0; }
+  .radios { display:flex; gap:20px; }
+  .radios span { display:flex; align-items:center; gap:7px; }
+  .radios label { display:inline; font-weight:500; font-size:14px; margin:0; cursor:pointer; }
+  .check label { display:flex; align-items:center; gap:8px; font-weight:500; font-size:14px; margin:0; cursor:pointer; }
+  .err { display:none; color:var(--error); font-size:12px; margin:5px 0 0; }
+  .err.show { display:block; }
+  input.invalid, select.invalid { border-color:var(--error); }
+  button.primary { width:100%; padding:11px; border:0; border-radius:7px; background:var(--accent); color:#fff; font:700 15px system-ui; cursor:pointer; }
+  button.primary:hover { background:var(--accent-dark); }
+  .result { display:none; text-align:center; padding:30px 22px; }
+  .result.show { display:block; }
+  .result .tick { width:44px; height:44px; margin:0 auto 12px; border-radius:50%; background:#e7efe9; color:var(--accent); display:grid; place-items:center; font-size:22px; font-weight:700; }
+  .result h2 { margin:0 0 6px; font-size:19px; color:var(--accent-dark); }
+  .summary { list-style:none; padding:0; margin:16px 0 0; font-size:14px; text-align:left; border-top:1px solid var(--line); }
+  .summary li { display:flex; justify-content:space-between; gap:12px; padding:8px 2px; border-bottom:1px solid #efece4; }
+  .summary span { color:var(--muted); }
+  .result .again { margin-top:16px; width:auto; background:none; border:1px solid var(--line); color:var(--ink); padding:9px 16px; font-weight:600; }
+  .result .again:hover { background:#f7f4ec; }
+  footer { margin-top:18px; text-align:center; color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>ActionPilot</h1><span class="badge">LOCAL DEMO</span></header>
+  <p class="sub">Create a test account — a deterministic page for recording and replaying browser workflows. Nothing leaves your browser.</p>
+
+  <form id="signupForm" novalidate>
+    <div class="field">
+      <label for="fullName">Full name</label>
+      <input id="fullName" name="fullName" type="text" placeholder="Demo User" autocomplete="off">
+      <p class="err" id="err-name">Enter a name.</p>
+    </div>
+    <div class="field">
+      <label for="email">Email address</label>
+      <input id="email" name="email" type="email" placeholder="demo.user@example.com" autocomplete="off">
+      <p class="err" id="err-email">Enter a valid email address.</p>
+    </div>
+    <fieldset>
+      <legend>Account type</legend>
+      <div class="radios">
+        <span><input id="personal" name="accountType" type="radio" value="personal"><label for="personal">Personal</label></span>
+        <span><input id="business" name="accountType" type="radio" value="business"><label for="business">Business</label></span>
+      </div>
+      <p class="err" id="err-type">Choose an account type.</p>
+    </fieldset>
+    <div class="field check">
+      <label for="terms"><input id="terms" name="terms" type="checkbox" value="accepted"> I accept the terms</label>
+      <p class="err" id="err-terms">Accept the terms to continue.</p>
+    </div>
+    <div class="field">
+      <label for="country">Country</label>
+      <select id="country" name="country">
+        <option value="">Select a country</option>
+        <option value="us">United States</option>
+        <option value="gb">United Kingdom</option>
+        <option value="de">Germany</option>
+        <option value="jp">Japan</option>
+        <option value="np">Nepal</option>
+      </select>
+      <p class="err" id="err-country">Select a country.</p>
+    </div>
+    <button id="submitBtn" class="primary" type="submit">Submit</button>
+  </form>
+
+  <div class="result" id="result" role="status">
+    <div class="tick">✓</div>
+    <h2>Account created successfully</h2>
+    <p class="sub" style="margin:0">Your test account is ready.</p>
+    <ul class="summary">
+      <li><span>Name</span><strong id="sumName"></strong></li>
+      <li><span>Email</span><strong id="sumEmail"></strong></li>
+      <li><span>Account type</span><strong id="sumType"></strong></li>
+      <li><span>Country</span><strong id="sumCountry"></strong></li>
+    </ul>
+    <button id="resetBtn" class="primary again" type="button">Reset form</button>
+  </div>
+
+  <footer>ActionPilot demo page · local only · no backend</footer>
+</div>
+<script>
+(function () {
+  var form = document.getElementById('signupForm');
+  var result = document.getElementById('result');
+  function show(id, on) { document.getElementById(id).classList.toggle('show', on); }
+  form.addEventListener('keydown', function (event) { if (event.key === 'Enter') event.preventDefault(); });
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var name = document.getElementById('fullName');
+    var email = document.getElementById('email');
+    var type = form.querySelector('input[name="accountType"]:checked');
+    var terms = document.getElementById('terms');
+    var country = document.getElementById('country');
+    var okName = name.value.trim().length > 0;
+    var okEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim());
+    var okType = !!type;
+    var okTerms = terms.checked;
+    var okCountry = country.value !== '';
+    show('err-name', !okName); name.classList.toggle('invalid', !okName);
+    show('err-email', !okEmail); email.classList.toggle('invalid', !okEmail);
+    show('err-type', !okType);
+    show('err-terms', !okTerms);
+    show('err-country', !okCountry); country.classList.toggle('invalid', !okCountry);
+    if (!(okName && okEmail && okType && okTerms && okCountry)) return;
+    document.getElementById('sumName').textContent = name.value.trim();
+    document.getElementById('sumEmail').textContent = email.value.trim();
+    document.getElementById('sumType').textContent = type.value === 'business' ? 'Business' : 'Personal';
+    document.getElementById('sumCountry').textContent = country.options[country.selectedIndex].text;
+    form.style.display = 'none';
+    result.classList.add('show');
+  });
+  document.getElementById('resetBtn').addEventListener('click', function () {
+    form.reset();
+    form.style.display = '';
+    result.classList.remove('show');
+    ['err-name','err-email','err-type','err-terms','err-country'].forEach(function (id) { show(id, false); });
+    document.getElementById('fullName').classList.remove('invalid');
+    document.getElementById('email').classList.remove('invalid');
+    document.getElementById('country').classList.remove('invalid');
+  });
+})();
+</script>
+</body>
+</html>

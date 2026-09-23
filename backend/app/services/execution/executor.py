@@ -7,7 +7,7 @@ from typing import Any
 
 from .browser import BrowserSession
 from .locator import resolve_locator
-from .models import ExecutionContext, ProgressCallback, StepOutcome
+from .models import ApprovalGate, ExecutionContext, ProgressCallback, StepOutcome
 
 
 class ConfirmationRequired(RuntimeError):
@@ -54,7 +54,7 @@ class BrowserExecutor:
         if context.stop_event.is_set():
             raise ExecutionStopped("Run stopped by user")
 
-    def execute(self, steps: list[dict[str, Any]], variables: dict[str, str] | None = None, stop_event: Event | None = None, pause_event: Event | None = None) -> list[StepOutcome]:
+    def execute(self, steps: list[dict[str, Any]], variables: dict[str, str] | None = None, stop_event: Event | None = None, pause_event: Event | None = None, gate: ApprovalGate | None = None) -> list[StepOutcome]:
         context = ExecutionContext(stop_event or Event(), pause_event or Event(), variables=variables or {})
         self.session = BrowserSession(self.runtime_dir, headless=self.headless)
         page = self.session.start()
@@ -68,13 +68,17 @@ class BrowserExecutor:
                 if step.get("type") == "select" and any(key in context.variables for key in ("color", "size")):
                     step["value"] = context.variables.get("color", context.variables.get("size", step.get("value", "")))
                 if self.risk_level(step) == "high":
-                    self.progress("waiting_confirmation", index, {"message": "Confirmation required"})
-                    raise ConfirmationRequired("Confirmation required")
+                    if gate is None:
+                        self.progress("waiting_confirmation", index, {"message": "Confirmation required"})
+                        raise ConfirmationRequired("Confirmation required")
+                    reason = gate(index, step)
+                    if reason:
+                        raise ExecutionStopped(reason)
                 self.progress("step_started", index, {"step": step})
                 _shot = self.session.screenshot(f"step-{index}.png")
                 self.progress("step_screenshot", index, {"screenshot_path": _shot})
                 try:
-                    self._execute_step(page, step, context)
+                    self.execute_step(page, step, context)
                     outcome = StepOutcome("completed", index, url=page.url, title=page.title())
                     outcomes.append(outcome)
                     verification = None
@@ -93,7 +97,7 @@ class BrowserExecutor:
             self.session.close()
             self.session = None
 
-    def _execute_step(self, page: Any, step: dict[str, Any], context: ExecutionContext) -> None:
+    def execute_step(self, page: Any, step: dict[str, Any], context: ExecutionContext) -> None:
         action_type = step["type"]
         target = step.get("target") or {}
         value = step.get("value")

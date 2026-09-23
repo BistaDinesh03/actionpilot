@@ -26,3 +26,6 @@ runtime/
 *.bak*
 backups/
 
+# Locally exported Playwright specs (generated artifacts)
+demo-exports/
+

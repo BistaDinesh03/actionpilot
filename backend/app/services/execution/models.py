@@ -24,3 +24,7 @@ class StepOutcome:
 
 
 ProgressCallback = Callable[[str, int, dict[str, Any]], None]
+
+# Approval gate invoked before a high-risk step runs. Returns None when the
+# user approved the step, or a human-readable reason to stop when they did not.
+ApprovalGate = Callable[[int, dict[str, Any]], str | None]

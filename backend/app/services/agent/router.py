@@ -19,6 +19,11 @@ class AgentRouter:
         research = bool(re.search(r"\b(research|find recent|search the web|compare|posts about|under [¥$€£]?\s?\d)\b", lowered))
         email = parse_email_command(text) is not None or bool(re.search(r"\b(email|reply to)\b", lowered))
         desktop = bool(re.search(r"\b(open|launch|notepad|vs code|visual studio code|desktop screenshot|type into)\b", lowered))
+        # The local account demo must be decided before desktop: the request starts
+        # with "Open …" which the desktop regex would otherwise claim.
+        local_account = bool(re.search(r"\b(create|sign[\s-]?up|register)\b[^.]*\baccount\b|\baccount\b[^.]*\b(demo|creation)\b|\blocal account\b", lowered))
+        if local_account and not research and not email:
+            return AgentPlan(request=text, intent="local_account", confidence=0.95, variables=request.variables, steps=self.registry.get("browser").plan_account(request))
         if desktop and not research and not email:
             return AgentPlan(request=text, intent="desktop", confidence=0.94, variables=request.variables, steps=self.registry.get("desktop").plan(request))
         if research and email:
