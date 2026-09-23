@@ -312,11 +312,21 @@ def create_email_run(task_name: str, status: str, detail: str) -> dict[str, Any]
     return get_run_or_404(run_id)
 
 
+def first_high_risk_index(plan: AgentPlan) -> int:
+    """0-based index of the first step that requires approval (falls back to the first step)."""
+    for index, step in enumerate(plan.steps):
+        if step.risk == "high":
+            return index
+    return 0
+
+
 def create_agent_run(plan: AgentPlan, status: str, output: dict[str, Any]) -> dict[str, Any]:
     run_id = str(uuid.uuid4())
     created = now()
+    # Waiting runs rest on their approval step; finished runs on the last step.
+    current_step = first_high_risk_index(plan) if status == "waiting_confirmation" else len(plan.steps)
     with db() as connection:
-        connection.execute("INSERT INTO runs (id, skill_id, task_name, status, current_step, logs, created_at, variables, current_action, tool, plan, output, requires_confirmation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (run_id, None, plan.request[:120], status, len(plan.steps), json.dumps([step.action for step in plan.steps]), created, json.dumps(plan.variables), "Complete" if status == "completed" else "Waiting for approval", plan.steps[0].tool if plan.steps else None, plan.model_dump_json(), json.dumps(output), int(plan.requires_confirmation)))
+        connection.execute("INSERT INTO runs (id, skill_id, task_name, status, current_step, logs, created_at, variables, current_action, tool, plan, output, requires_confirmation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (run_id, None, plan.request[:120], status, current_step, json.dumps([step.action for step in plan.steps]), created, json.dumps(plan.variables), "Complete" if status == "completed" else "Waiting for approval", plan.steps[0].tool if plan.steps else None, plan.model_dump_json(), json.dumps(output), int(plan.requires_confirmation)))
         for index, step in enumerate(plan.steps):
             connection.execute("INSERT INTO run_steps (id, run_id, step_index, label, action_type, status, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (str(uuid.uuid4()), run_id, index, step.action, step.tool, "completed" if status == "completed" else "waiting_confirmation", created, created if status == "completed" else None))
     return get_run_or_404(run_id)
@@ -664,6 +674,7 @@ def agent_execute(payload: AgentExecuteRequest) -> dict[str, Any]:
     if plan.intent == "run_skill":
         if plan.requires_confirmation and not payload.approved:
             run = create_agent_run(plan, "waiting_confirmation", {})
+            request_upfront_approval(run["id"], plan)
             return {"status": "waiting_confirmation", "requires_confirmation": True, "run_id": run["id"], "message": "Explicit approval is required before this action."}
         step = plan.steps[0]
         run = create_run(RunCreate(skill_id=str(step.parameters["skill_id"]), task_name=plan.request[:120], variables=plan.variables))
@@ -691,9 +702,12 @@ def agent_execute(payload: AgentExecuteRequest) -> dict[str, Any]:
                     result.output["recipient"] = contacts[0].model_dump()
         run_status = "completed" if result.status == "completed" and not plan.requires_confirmation else "waiting_confirmation"
         run = create_agent_run(plan, run_status, result.output)
+        if run_status == "waiting_confirmation":
+            request_upfront_approval(run["id"], plan)
         return {"status": run_status, "run_id": run["id"], "output": result.output, "requires_confirmation": plan.requires_confirmation, "message": "Research complete. Email remains pending approval." if plan.intent == "research_and_email" else result.message}
     if plan.requires_confirmation and not payload.approved:
         run = create_agent_run(plan, "waiting_confirmation", {})
+        request_upfront_approval(run["id"], plan)
         return {"status": "waiting_confirmation", "requires_confirmation": True, "run_id": run["id"], "message": "Explicit approval is required before this action."}
     return {"status": "clarify", "message": plan.message or "I could not determine how to execute this request."}
 
@@ -1012,14 +1026,24 @@ def approval_from_row(row: sqlite3.Row) -> dict[str, Any]:
     return approval
 
 
-def create_approval(run_id: str, step_index: int, summary: str, detail: dict[str, Any]) -> str:
+def create_approval(run_id: str, step_index: int, summary: str, detail: dict[str, Any], kind: str = "step") -> str:
     approval_id = str(uuid.uuid4())
     with db() as connection:
         connection.execute(
             "INSERT INTO approvals (id, run_id, step_index, kind, summary, detail, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (approval_id, run_id, step_index, "step", summary, json.dumps(detail), "pending", now()),
+            (approval_id, run_id, step_index, kind, summary, json.dumps(detail), "pending", now()),
         )
     return approval_id
+
+
+def request_upfront_approval(run_id: str, plan: AgentPlan) -> None:
+    """Attach the single approval row for an upfront-gated waiting run."""
+    index = first_high_risk_index(plan)
+    step = plan.steps[index] if plan.steps else None
+    summary = step.action if step else plan.request[:120]
+    detail = step.model_dump() if step else {"action": plan.request[:120], "risk": "high"}
+    create_approval(run_id, index, summary, detail, kind="upfront")
+    write_audit("approval_requested", f"step {index + 1}: {summary}")
 
 
 def approval_status(approval_id: str) -> str | None:
@@ -1028,10 +1052,22 @@ def approval_status(approval_id: str) -> str | None:
     return str(row["status"]) if row else None
 
 
+def approved_approval_exists(run_id: str, step_index: int) -> bool:
+    with db() as connection:
+        row = connection.execute(
+            "SELECT 1 FROM approvals WHERE run_id = ? AND step_index = ? AND status = 'approved' LIMIT 1",
+            (run_id, step_index),
+        ).fetchone()
+    return row is not None
+
+
 def approval_gate(run_id: str, controls: dict[str, threading.Event]):
     """Blocks a high-risk step until its approval row is resolved or the run stops."""
 
     def gate(index: int, step: dict[str, Any]) -> str | None:
+        # An upfront approval already covers this step: proceed without asking again.
+        if approved_approval_exists(run_id, index):
+            return None
         summary = str(step.get("label") or step.get("action") or "High-risk action")
         approval_id = create_approval(run_id, index, summary, step)
         safe_set_run(run_id, "waiting_confirmation", current_step=index, current_action="Waiting for approval", error=None)
@@ -1099,10 +1135,34 @@ def _resolve_approval(approval_id: str, decision: str) -> dict[str, Any]:
     return approval
 
 
+def resume_upfront_run(run_id: str) -> None:
+    """Continue an upfront-gated run now that its plan-level approval is granted."""
+    with db() as connection:
+        row = connection.execute("SELECT status, plan, variables, task_name FROM runs WHERE id = ?", (run_id,)).fetchone()
+    if not row or row["status"] != "running":
+        return
+    plan_data = json.loads(row["plan"] or "{}")
+    variables = json.loads(row["variables"] or "{}")
+    if plan_data.get("intent") == "run_skill":
+        steps = plan_data.get("steps") or [{}]
+        parameters = steps[0].get("parameters") or {}
+        skill_id = str(parameters.get("skill_id") or "")
+        if not skill_id:
+            return
+        target, args = execute_run, (run_id, skill_id, variables)
+    else:
+        request = str(plan_data.get("request") or row["task_name"])
+        target, args = execute_agent_run, (run_id, request, variables)
+    run_controls[run_id] = {"stop": threading.Event(), "pause": threading.Event()}
+    threading.Thread(target=target, args=args, daemon=True).start()
+
+
 @app.post("/api/approvals/{approval_id}/approve")
 def approve_approval(approval_id: str) -> dict[str, Any]:
     approval = _resolve_approval(approval_id, "approved")
     write_audit("approval_approved", f"step {approval['step_index'] + 1}: {approval['summary']}")
+    if approval.get("kind") == "upfront":
+        resume_upfront_run(approval["run_id"])
     return approval
 
 

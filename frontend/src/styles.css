@@ -119,10 +119,74 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{
 .runs-history .run-state{text-align:right}
 .runs-history .run-state.paused{color:#d8c48a}
 .runs-history .run-state.queued{color:#9aa8b2}
-@media(max-width:700px){.runs-history-row{grid-template-columns:1fr auto}.runs-history-steps{display:none}}
+@media(max-width:700px){.runs-history-row{grid-template-columns:1fr auto auto}.runs-history-steps{display:none}}
 
 /* Sidebar: subtle accent bar on the active item, readable tertiary text */
 .nav-item.active{box-shadow:inset 3px 0 0 #8ce0ad}
 .version{color:#6b7681}
 .command-hint{color:#7c8a83}
 .activity-time{color:#77828d}
+
+/* === Product polish pass (append-only) === */
+
+/* Phase 1 — hierarchy: grouped sidebar, Command as the clear starting point */
+.nav .nav-group:not(:first-child){margin-top:16px}
+.nav-item.primary{color:#d7ece0;font-weight:600}
+.section-heading{flex-wrap:wrap;gap:12px}
+
+/* Phase 2/13 — Command screen: purpose line + trust microcopy */
+.command-lede{max-width:640px;color:#93a3a0;font-size:13px;line-height:1.55;margin:0 0 16px}
+.command-foot{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;justify-content:space-between}
+.trust-note{color:#5f6f6a;font-size:11px}
+.trust-note::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:#77d39e;margin-right:7px;vertical-align:1px}
+.command-panel input{font-size:17px}
+@media(max-width:850px){.command-panel input{font-size:15px}}
+.nomatch-teach{margin-top:12px}
+
+/* Phase 3 — plan header actions (risk badge + dismiss) */
+.plan-header-actions{display:flex;gap:10px;align-items:center}
+.plan-dismiss{flex:0 0 auto}
+
+/* Phase 4 — live run: current page line, planned (not started) timeline rows */
+.live-url{display:block;margin-top:2px;color:#7f938a;font-size:11px;word-break:break-all}
+.live-url small{margin-right:8px;color:#5f7169;text-transform:uppercase;letter-spacing:.08em;font-size:10px}
+.step-row.planned{cursor:default;color:#7d8c86;opacity:.75}
+.step-row.planned:hover{background:transparent}
+.step-type.planned{color:#5f7169}
+
+/* Phase 5 — approval: consequence line reads calmer than the primary copy */
+.approval-consequence{color:#9db3a7}
+
+/* Phase 7 — history: column header row (hidden with its column on narrow screens) */
+.runs-history-cols{display:grid;grid-template-columns:1fr 150px 64px 74px;gap:14px;padding:2px 6px 8px;color:#6b7681;font-size:10px;letter-spacing:.1em}
+.runs-history-cols .runs-history-time{text-align:right}
+.runs-history-cols .runs-history-steps{text-align:right}
+@media(max-width:700px){.runs-history-cols{display:none}}
+
+/* Phase 9 — skills page hierarchy instead of a centered card */
+.skills-sub{margin-top:6px;max-width:560px}
+.skills-list{margin-top:4px}
+.skills-row-actions{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+.card-delete{color:#ff9d9d}
+.card-delete:hover{color:#ffb8b8}
+.skill-desc{color:#7f8c91;font-weight:400;margin-top:5px}
+.full-skill-list>div{flex-wrap:wrap;row-gap:8px}
+
+/* Phase 10/12 — honest empty states, teach flow explainer */
+.empty-state{margin-top:16px}
+.teach-steps{margin:14px 0 0;padding-left:19px;color:#9fb2a8;font-size:11.5px;line-height:1.8;text-align:left}
+.teach-steps::marker{color:#8ce0ad}
+
+/* Phase 14 — narrow viewport: no horizontal overflow, cards stay inside the shell */
+body{min-width:0}
+.main{min-width:0}
+@media(max-width:700px){.page-placeholder{padding:26px 16px}.command-lede{font-size:12.5px}.skills-row-actions{width:100%}}
+
+/* Review fixes — run header controls never wrap; errors (tracebacks, long paths) wrap safely */
+.run-controls{flex-shrink:0}
+.run-controls button{white-space:nowrap;flex-shrink:0}
+.error-text{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}
+.plan-review-cta{margin-top:10px}
+
+/* Fix 4 (narrow widths) — below 700px the run header and its controls stack instead of overflowing sideways */
+@media(max-width:700px){.run-header{flex-wrap:wrap}.run-controls{flex-wrap:wrap}}

@@ -32,7 +32,10 @@ def test_mixed_research_creates_draft_but_does_not_send(tmp_path, monkeypatch):
         with TestClient(main.app) as client:
             plan = client.post("/api/agent/plan", json={"request": "Research AI automation and email John the summary"}).json()
             result = client.post("/api/agent/execute", json={"plan": plan, "approved": False}).json()
+            approvals = client.get("/api/approvals", params={"run_id": result["run_id"]}).json()
         assert result["status"] == "waiting_confirmation"
+        assert len(approvals) == 1
+        assert approvals[0]["status"] == "pending"
         assert result["requires_confirmation"] is True
         assert result["output"]["draft_id"] == "draft-summary"
         assert len(gmail.drafts) == 1

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, ShieldCheck, Square } from 'lucide-react';
 import { API, fetchPendingApprovals, resolveApproval } from '../lib/api';
-import { runPhase } from '../lib/labels';
+import { errorHeadline, runPhase, stepStatusLabel, statusLabel } from '../lib/labels';
 import type { Approval, Run, RunStep } from '../types';
 
 export function RunView({ run, setRun }: { run: Run; setRun: (run: Run | null) => void }) {
@@ -31,12 +31,29 @@ export function RunView({ run, setRun }: { run: Run; setRun: (run: Run | null) =
   const activeStep = activeIndex !== null ? run.steps.find((s) => s.step_index === activeIndex) ?? null : null;
   const runningStep = run.steps.find((s) => s.status === 'running') ?? (run.steps.length > 0 ? run.steps[run.steps.length - 1] : null);
   const done = run.steps.filter((s) => s.status === 'completed').length;
-  const total = Math.max(run.plan?.length ?? 0, run.steps.length, run.status === 'waiting_confirmation' ? run.current_step + 1 : 0);
+  const total = Math.max(run.plan?.length ?? 0, run.steps.length);
+  const approvalSteps = approvals.map((item) => item.step_index);
   const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
   const summary = run.status === 'completed'
     ? (verification && verification.passed === false ? `All ${total} steps finished — verification flagged an issue.` : `All ${total} steps finished${verification ? ' and verified' : ''}.`)
     : run.status === 'failed' ? `Run failed after ${done} of ${total} steps.`
     : `Stopped after ${done} of ${total} steps.`;
+  // Latest page we actually observed (never fabricated): most recent step that recorded a URL.
+  const currentPage = runningStep?.url || [...run.steps].reverse().find((step) => step.url)?.url || null;
+  // Steps that are part of the plan but have not started yet, so the timeline
+  // always shows the full plan (e.g. the step waiting for approval).
+  const plannedLabels: string[] = (() => {
+    const plan = run.plan as unknown;
+    if (Array.isArray(plan)) return plan.map((step: Record<string, unknown>) => String(step?.label ?? step?.type ?? 'Planned step'));
+    if (plan && Array.isArray((plan as { steps?: unknown }).steps)) {
+      return ((plan as { steps: Array<Record<string, unknown>> }).steps).map((step) => String(step?.action ?? 'Planned step'));
+    }
+    return [];
+  })();
+  const plannedRows = !terminal && plannedLabels.length > run.steps.length
+    ? plannedLabels.slice(run.steps.length).map((label, index) => ({ step_index: run.steps.length + index, label }))
+    : [];
+  const stepOfLine = `Step ${Math.min(run.current_step + 1, Math.max(total, 1))} of ${total}${run.current_action ? ` — ${run.current_action}` : ''}`;
 
   useEffect(() => {
     if (terminal) { setApprovals([]); return; }
@@ -78,7 +95,7 @@ export function RunView({ run, setRun }: { run: Run; setRun: (run: Run | null) =
       <div>
         <span className="eyebrow">{runPhase(run)}</span>
         <h2>{run.task_name}</h2>
-        <p className="muted">{terminal ? summary : (run.current_action || 'Starting browser...')}</p>
+        <p className="muted">{terminal ? summary : stepOfLine}</p>
       </div>
       <div className="run-controls">
         <button className="secondary-button" onClick={() => setRun(null)} title="Back to run history">← All runs</button>
@@ -89,8 +106,8 @@ export function RunView({ run, setRun }: { run: Run; setRun: (run: Run | null) =
     </div>
 
     <div className="run-status">
-      <span className={`run-state ${run.status}`}>{run.status.replace('_', ' ')}</span>
-      {run.error && <span className="error-text">{run.error}</span>}
+      <span className={`run-state ${run.status}`}>{statusLabel(run.status)}</span>
+      {run.error && <span className="error-text">{errorHeadline(run.error)}</span>}
     </div>
 
     <div className="run-progress" title={`${done} of ${total} steps completed`}>
@@ -103,7 +120,8 @@ export function RunView({ run, setRun }: { run: Run; setRun: (run: Run | null) =
         {approvals.map((approval) => (
           <div className="approval-card" key={approval.id}>
             <div className="approval-head"><ShieldCheck size={18} /><div><span className="eyebrow">APPROVAL REQUIRED</span><strong>{approval.summary}</strong></div></div>
-            <p className="muted">Step {approval.step_index + 1} is paused while the agent waits for your decision.</p>
+            <p className="muted">ActionPilot paused before step {approval.step_index + 1} while it waits for your decision.</p>
+            <p className="muted approval-consequence">Approve runs this step and continues the run. Reject stops the run here.</p>
             <div className="approval-actions">
               <button className="secondary-button" onClick={() => decide(approval.id, 'reject')}>Reject</button>
               <button className="primary-button" onClick={() => decide(approval.id, 'approve')}><Check size={15} />Approve</button>
@@ -117,29 +135,36 @@ export function RunView({ run, setRun }: { run: Run; setRun: (run: Run | null) =
             return <div className={cls} key={step.step_index} onClick={() => onStepClick(step)} title="Click to view this step">
               <span className="step-number">{String(step.step_index + 1).padStart(2, '0')}</span>
               <span>{step.label || step.error || 'Browser action'}</span>
-              <span className={`step-type ${step.status}`}>{step.status}</span>
+              <span className={`step-type ${step.status}`}>{stepStatusLabel(step, run, approvalSteps)}</span>
             </div>;
           })}
+          {plannedRows.map((row) => (
+            <div className="step-row planned" key={`planned-${row.step_index}`} title="Part of the plan, not started yet">
+              <span className="step-number">{String(row.step_index + 1).padStart(2, '0')}</span>
+              <span>{row.label}</span>
+              <span className="step-type planned">planned</span>
+            </div>
+          ))}
         </div>
 
         {activeStep && (
           <div className="step-detail">
             <div className="step-detail-head">
               <strong>Step {String(activeStep.step_index + 1).padStart(2, '0')}</strong>
-              <span className={`step-type ${activeStep.status}`}>{activeStep.status}</span>
+              <span className={`step-type ${activeStep.status}`}>{stepStatusLabel(activeStep, run, approvalSteps)}</span>
             </div>
             <div className="step-detail-meta">
               <span><small>type</small> {activeStep.action_type || 'browser'}</span>
               {activeStep.url && <span><small>url</small> {activeStep.url}</span>}
               {activeStep.title && <span><small>title</small> {activeStep.title}</span>}
             </div>
-            {activeStep.error && <p className="error-text">{activeStep.error}</p>}
+            {activeStep.error && <p className="error-text">{errorHeadline(activeStep.error)}</p>}
           </div>
         )}
 
         {run.status === 'failed' && run.screenshot_path && <div className="failure-detail">
           <strong>Run failed</strong>
-          <span>{run.error}</span>
+          <span>{errorHeadline(run.error)}</span>
         </div>}
       </div>
 
@@ -160,6 +185,7 @@ export function RunView({ run, setRun }: { run: Run; setRun: (run: Run | null) =
             ) : (
               <div className="run-live-empty">Waiting for the first step…</div>
             )}
+            {currentPage && <span className="live-url"><small>Current page</small> {currentPage}</span>}
           </div>
         )}
         {activeStep && (
@@ -181,12 +207,11 @@ export function RunView({ run, setRun }: { run: Run; setRun: (run: Run | null) =
         {terminal && (
           <div className="run-result">
             <strong>Final result</strong>
-            <div className="run-result-row"><span>Status</span><b className={`step-type ${run.status}`}>{run.status}</b></div>
             <div className="run-result-row"><span>Steps completed</span><b>{done} / {Math.max(total, done)}</b></div>
             <div className="run-result-row"><span>Evidence</span><b>{run.steps.filter((s) => s.screenshot_path).length} screenshots{videoAvailable ? ' + video' : ''}</b></div>
             {verification && <div className="run-result-row"><span>Verification</span><b className={verification.passed ? 'step-type completed' : 'step-type failed'}>{verification.passed ? 'Verified' : 'Not verified'}</b></div>}
             {verification?.summary && <div className="run-result-row"><span>Result</span><b>{verification.summary}</b></div>}
-            {run.error ? <p className="error-text">{run.error}</p> : <p className="muted">{run.current_action || 'All steps finished.'}</p>}
+            {run.error ? <p className="error-text">{run.error}</p> : !run.status.includes('completed') ? <p className="muted">{run.current_action || 'Run ended.'}</p> : null}
           </div>
         )}
       </div>

@@ -1,19 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getJson } from '../lib/api';
+import { relTime, statusLabel } from '../lib/labels';
 import type { Run } from '../types';
-
-function relTime(iso: string): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return '';
-  const seconds = Math.round((Date.now() - then) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return `${days}d ago`;
-}
 
 function progressLabel(run: Run): string {
   const done = run.steps.filter((step) => step.status === 'completed').length;
@@ -37,10 +25,11 @@ export function RunsHistory({ onOpen }: { onOpen: (run: Run) => void }) {
         : runs.length === 0 ? <p className="muted">{error ? 'Couldn\'t reach the local backend to load runs.' : 'No runs yet. Run a Skill to watch it step by step — with screenshots, video, and a full timeline.'}</p>
         : (
           <div className="runs-history-list">
+            <div className="runs-history-cols" aria-hidden="true"><span>TASK</span><span>STATUS</span><span className="runs-history-steps">PROGRESS</span><span className="runs-history-time">TIME</span></div>
             {runs.slice(0, 30).map((run) => (
               <button className="runs-history-row" key={run.id} onClick={() => onOpen(run)} title={`Open run ${run.id}`}>
                 <span className="runs-history-name">{run.task_name || 'Untitled run'}</span>
-                <span className={`run-state ${run.status}`}>{run.status.replace('_', ' ')}</span>
+                <span className={`run-state ${run.status}`}>{statusLabel(run.status)}</span>
                 <span className="runs-history-steps">{progressLabel(run)}</span>
                 <span className="runs-history-time">{run.created_at ? relTime(run.created_at) : ''}</span>
               </button>
