@@ -76,7 +76,9 @@ def execute(action: DesktopAction, runtime_dir: Path) -> DesktopObservation:
         return launch(action.application_id, runtime_dir)
     if action.type == "take_screenshot":
         return observe_desktop(runtime_dir)
-    if action.type in {"type_text", "press_key", "hotkey"} and not action.target:
+    if action.type == "wait" and not action.target:
+        control = None
+    elif action.type in {"type_text", "press_key", "hotkey"} and not action.target:
         control = _active_window()
         if action.type == "type_text":
             edits = [candidate for candidate in control.descendants() if candidate.element_info.control_type in {"Edit", "Document"}]

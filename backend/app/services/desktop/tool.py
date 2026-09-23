@@ -35,11 +35,14 @@ class DesktopTool:
         if match:
             steps.append(PlanStep(tool=self.name, action="Type text into the focused application", risk="low", parameters={"action": {"type": "type_text", "value": match.group(1).strip().rstrip(".")}}))
         if "delete" in text:
-            steps.append(PlanStep(tool=self.name, action="Delete the requested file", risk="high", parameters={"action": {"type": "wait", "value": "0", "risk": "high"}}))
+            steps.append(PlanStep(tool=self.name, action="Delete the requested file", risk="high", parameters={"action": {"type": "delete_file"}}))
         return steps
 
     def execute(self, plan: PlanStep, approved: bool = False) -> ToolResult:
-        action = DesktopAction.model_validate(plan.parameters.get("action", {}))
+        raw_action = plan.parameters.get("action", {})
+        if isinstance(raw_action, dict) and raw_action.get("type") == "delete_file":
+            return ToolResult(status="failed", message="Delete file is not yet supported.")
+        action = DesktopAction.model_validate(raw_action)
         if requires_confirmation(action) and not approved:
             return ToolResult(status="waiting_confirmation", requires_confirmation=True, message="Confirmation required before this desktop action.")
         try:
