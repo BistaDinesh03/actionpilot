@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .services.execution.executor import BrowserExecutor, ConfirmationRequired, ExecutionStopped
-from .services.execution.run_state import TERMINAL_RUN_STATUSES, InvalidTransition, validate_transition
+from .services.execution.run_state import RUN_STATUSES, TERMINAL_RUN_STATUSES, InvalidTransition, validate_transition
 from .services.agent.agent import ActionPilotAgent
 from .services.agent.loop import AgentLoop
 from .services.agent.memory import MemoryStore
@@ -150,6 +150,7 @@ def init_db() -> None:
 @app.on_event("startup")
 def startup() -> None:
     init_db()
+    reconcile_interrupted_runs()
 
 
 class Target(BaseModel):
@@ -876,6 +877,26 @@ def safe_set_run(run_id: str, status: str, **fields: Any) -> None:
         set_run(run_id, status, **fields)
     except InvalidTransition:
         pass
+
+
+def reconcile_interrupted_runs() -> int:
+    """Startup reconciliation: fail runs left non-terminal by a process restart.
+
+    Selects only current non-terminal statuses, so terminal runs are never
+    touched and rerunning this is a no-op (no duplicate audit events).
+    """
+    non_terminal = tuple(status for status in RUN_STATUSES if status not in TERMINAL_RUN_STATUSES)
+    with db() as connection:
+        rows = connection.execute(
+            f"SELECT id, task_name FROM runs WHERE status IN ({', '.join('?' for _ in non_terminal)})",
+            non_terminal,
+        ).fetchall()
+    for row in rows:
+        # Every non-terminal status already allows -> failed in the transition
+        # table, so reconciliation validates like any other run transition.
+        set_run(row["id"], "failed", error="Interrupted by backend restart")
+        write_audit("run_interrupted", row["task_name"] or row["id"])
+    return len(rows)
 
 
 def execution_progress(run_id: str, event: str, step_index: int, data: dict[str, Any]) -> None:
