@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 from ..gmail.models import EmailIntent
 from ..gmail.service import GmailService, parse_email_command
 from ..matching.matcher import match_command
-from .models import AgentPlan, AgentRequest, PlanStep, ToolResult
+from .models import AgentPlan, AgentRequest, PlanStep, ToolResult, VerificationResult
 from .registry import ToolRegistry
 
 
@@ -100,7 +100,12 @@ class WebResearchTool:
         except Exception as error:
             return ToolResult(status="failed", message="Web research could not complete safely.", output={"error": str(error)[:240]})
         ideas = self._ideas(sources)
-        return ToolResult(status="completed", output={"query": search_terms, "sources": sources, "ideas": ideas})
+        verification = VerificationResult.from_checks(
+            {"sources_found": bool(sources)},
+            summary=f"Collected {len(sources)} cited sources." if sources else "Not verified: no sources could be collected from the search results.",
+            evidence=[str(source.get("url") or "") for source in sources[:5]],
+        ).model_dump()
+        return ToolResult(status="completed", output={"query": search_terms, "sources": sources, "ideas": ideas, "verification": verification})
 
     @staticmethod
     def _ideas(sources: list[dict[str, str]]) -> list[str]:

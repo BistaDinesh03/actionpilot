@@ -11,8 +11,9 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
 
-from .models import AgentRequest, PlanStep, ToolResult
+from .models import AgentRequest, Decision, MAX_RETARGETS, PlanStep, ToolResult, VerificationResult
 from .observer import observe_page
+from .state import Observation
 from ..computer.observation import from_browser
 from ..execution.browser import BrowserSession
 from ..execution.executor import BrowserExecutor
@@ -21,6 +22,9 @@ from ..execution.models import ExecutionContext
 # The account flow only ever runs against the local demo site.
 DEFAULT_DEMO_URL = "http://127.0.0.1:4173/account.html"
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
+# Semantic planned target for the submit action. The decision layer compares
+# it against a fresh bounded observation before any click happens.
+PLANNED_SUBMIT_TARGET = {"role": "button", "name": "Submit"}
 
 
 class BrowserTool:
@@ -111,7 +115,13 @@ class BrowserTool:
             return ToolResult(status="failed", message=error, output={"phase": "open"})
         session, page = self._start_session(parameters)
         observation = observe_page(page)
-        return ToolResult(status="completed", output={"phase": "open", "url": page.url, "title": page.title(), "screenshot_path": session.screenshot("open.png"), "observation": observation.model_dump()})
+        screenshot = session.screenshot("open.png")
+        verification = VerificationResult.from_checks(
+            {"page_reached": page.url.rstrip("/") == url.rstrip("/")},
+            summary=f"Opened {page.url} ({page.title() or 'no title'}).",
+            evidence=[screenshot, page.url],
+        ).model_dump()
+        return ToolResult(status="completed", output={"phase": "open", "url": page.url, "title": page.title(), "screenshot_path": screenshot, "observation": observation.model_dump(), "verification": verification})
 
     def _phase_fill(self, parameters: dict[str, Any]) -> ToolResult:
         page = self._page(parameters)
@@ -127,19 +137,49 @@ class BrowserTool:
         for sub_step in sub_steps:
             self._executor.execute_step(page, sub_step, context)
         session = self._sessions[str(parameters["session_id"])]
+        screenshot = session.screenshot("fill.png")
+        # Truthful verification: read every field back and compare it with
+        # what the plan asked for.
+        checks = {
+            "name": page.locator("#fullName").input_value() == str(parameters["name"]),
+            "email": page.locator("#email").input_value() == str(parameters["email"]),
+            "account_type": page.locator(f'input[name="accountType"][value="{account_type}"]').is_checked(),
+            "terms": page.locator("#terms").is_checked(),
+            "country": page.locator("#country").input_value() == str(parameters["country"]),
+        }
+        failed = [key for key, ok in checks.items() if not ok]
+        verification = VerificationResult.from_checks(
+            checks,
+            summary="Form fields match the requested account values." if not failed else f"Not verified: mismatch on {', '.join(failed)}.",
+            evidence=[screenshot, page.url],
+        ).model_dump()
         return ToolResult(status="completed", output={
             "phase": "fill",
             "url": page.url,
             "title": page.title(),
-            "screenshot_path": session.screenshot("fill.png"),
+            "screenshot_path": screenshot,
             "filled": {"name": parameters["name"], "email": parameters["email"], "account_type": account_type, "country": parameters["country"]},
+            "observation": observe_page(page).model_dump(),
+            "verification": verification,
         })
 
     def _phase_submit(self, parameters: dict[str, Any]) -> ToolResult:
         page = self._page(parameters)
-        self._executor.execute_step(page, {"type": "click", "label": "Submit the account form", "target": {"css": "#submitBtn"}}, self._context())
+        # The decision layer may have re-targeted this click from a fresh
+        # observation; otherwise the recorded css default is used.
+        target = parameters.get("target") or {"css": "#submitBtn"}
+        before = page.locator("body").inner_text(timeout=5_000)[:4000]
+        self._executor.execute_step(page, {"type": "click", "label": "Submit the account form", "target": target}, self._context())
         session = self._sessions[str(parameters["session_id"])]
-        return ToolResult(status="completed", output={"phase": "submit", "submitted": True, "url": page.url, "title": page.title(), "screenshot_path": session.screenshot("submit.png")})
+        screenshot = session.screenshot("submit.png")
+        after = page.locator("body").inner_text(timeout=5_000)[:4000]
+        responded = after != before
+        verification = VerificationResult.from_checks(
+            {"effect_observed": responded},
+            summary="The page visibly responded to the submit action." if responded else "Not verified: the page showed no visible response to the submit action.",
+            evidence=[screenshot, page.url],
+        ).model_dump()
+        return ToolResult(status="completed", output={"phase": "submit", "submitted": True, "url": page.url, "title": page.title(), "screenshot_path": screenshot, "observation": observe_page(page).model_dump(), "verification": verification})
 
     def _phase_verify(self, parameters: dict[str, Any]) -> ToolResult:
         session = self._sessions.get(str(parameters["session_id"]))
@@ -157,13 +197,19 @@ class BrowserTool:
             visible = False
         observation = observe_page(page)
         screenshot = session.screenshot("verify.png")
-        common = {"phase": "verify", "url": page.url, "title": page.title(), "screenshot_path": screenshot}
+        common = {"phase": "verify", "url": page.url, "title": page.title(), "screenshot_path": screenshot, "observation": observation.model_dump()}
         if not visible:
             visible_errors = page.locator(".err.show").all_text_contents()
             message = "Account creation could not be verified: success panel not visible"
             if visible_errors:
                 message += f" — page errors: {'; '.join(text.strip() for text in visible_errors)}"
-            return ToolResult(status="failed", message=message, output={**common, "verification": {"passed": False, "checks": {"result_visible": False}, "visible_errors": visible_errors}})
+            verification = VerificationResult.from_checks(
+                {"result_visible": False},
+                summary="Not verified: the success panel never became visible.",
+                evidence=[screenshot, page.url],
+                visible_errors=visible_errors,
+            ).model_dump()
+            return ToolResult(status="failed", message=message, output={**common, "verification": verification})
         observed = {
             "name": page.locator("#sumName").inner_text(),
             "email": page.locator("#sumEmail").inner_text(),
@@ -184,13 +230,82 @@ class BrowserTool:
             "account_type": observed["account_type"] == expected["account_type"],
             "country": observed["country"] == expected["country"],
         }
-        verification = {"passed": all(checks.values()), "checks": checks, "observed": observed, "expected": expected}
-        if verification["passed"]:
-            verification["summary"] = f"Account created for {expected['name']} ({expected['account_type']}, {expected['country']}) on the local demo."
-            return ToolResult(status="completed", output={**common, "verification": verification})
         failed = [key for key, ok in checks.items() if not ok]
-        verification["summary"] = f"Not verified: mismatch on {', '.join(failed)}."
+        summary = f"Not verified: mismatch on {', '.join(failed)}." if failed else f"Account created for {expected['name']} ({expected['account_type']}, {expected['country']}) on the local demo."
+        verification = VerificationResult.from_checks(checks, summary=summary, evidence=[screenshot, page.url], observed=observed, expected=expected).model_dump()
+        if not failed:
+            return ToolResult(status="completed", output={**common, "verification": verification})
         return ToolResult(status="failed", message=f"Account creation could not be verified: mismatch on {', '.join(failed)}.", output={**common, "verification": verification})
+
+    def observe(self, plan: PlanStep) -> Observation | None:
+        """Bounded, side-effect-free observation of the live page before acting.
+
+        Never navigates, never opens a session, never clicks. When no session
+        exists yet (or the page cannot be read) an honest "unavailable"
+        observation is returned so the decision layer can fall back to the
+        original plan instead of guessing.
+        """
+        session_id = plan.parameters.get("session_id")
+        session = self._sessions.get(str(session_id)) if session_id else None
+        if session is None or session.page is None:
+            return Observation(kind="browser", summary="No browser session is open yet.", data={"available": False})
+        try:
+            observation = observe_page(session.page)
+        except Exception:
+            return Observation(kind="browser", summary="Page observation failed safely; the original plan will be used.", data={"available": False})
+        observation.data["available"] = True
+        return observation
+
+    @staticmethod
+    def _stable_target(candidate: dict[str, Any]) -> dict[str, Any] | None:
+        """Deterministic selector for a uniquely matched control (id first)."""
+        target: dict[str, Any] = {}
+        if candidate.get("id"):
+            target["css"] = f"#{candidate['id']}"
+        name = str(candidate.get("name") or "").strip()
+        if name:
+            target["role"] = "button"
+            target["name"] = name
+        return target or None
+
+    def adapt(self, plan: PlanStep, observation: Observation) -> tuple[PlanStep, Decision]:
+        """Deterministic, bounded re-targeting from a fresh observation.
+
+        Executes the planned step when it is still valid, re-targets only
+        when existing deterministic matching rules establish a single safe
+        match, and fails honestly otherwise. Never guesses, never loops.
+        """
+        phase = plan.parameters.get("phase")
+        if phase != "submit":
+            return plan, Decision(kind="execute", reason="This step carries no semantic target to re-check.")
+        planned = plan.parameters.get("target") or PLANNED_SUBMIT_TARGET
+        planned_name = str(planned.get("name") or "").strip()
+        if not planned_name:
+            return plan, Decision(kind="execute", reason="Planned target has no semantic name; the executor resolves it.")
+        data = observation.data or {}
+        if data.get("available") is not True:
+            return plan, Decision(kind="execute", reason="No fresh observation; the original plan is used unchanged.")
+        if data.get("elements_truncated"):
+            return plan, Decision(kind="execute", reason="Observation was truncated; the original plan is used unchanged.")
+        elements = data.get("elements") or []
+        candidates = [
+            element for element in elements
+            if element.get("visible") and (element.get("role") == "button" or element.get("tag") == "button" or element.get("type") == "submit")
+        ]
+        exact = [element for element in candidates if str(element.get("name") or "").strip().casefold() == planned_name.casefold()]
+        if exact:
+            return plan, Decision(kind="execute", reason=f"Planned target {planned_name!r} is present in the fresh observation.")
+        if len(candidates) == 1:
+            candidate = candidates[0]
+            target = self._stable_target(candidate)
+            if target is None:
+                return plan, Decision(kind="fail", reason="Target not found: the only matching control has no stable selector.")
+            adapted = plan.model_copy(deep=True)
+            adapted.parameters["target"] = target
+            return adapted, Decision(kind="retarget", reason=f"Planned control {planned_name!r} is gone; uniquely matched visible control {candidate.get('name')!r}.", target=target, replans=MAX_RETARGETS)
+        if not candidates:
+            return plan, Decision(kind="fail", reason="Target not found: no visible control matches the planned action.")
+        return plan, Decision(kind="fail", reason=f"Ambiguous target: {len(candidates)} visible controls could match; refusing to guess.")
 
     def execute(self, plan: PlanStep, approved: bool = False) -> ToolResult:
         phase = plan.parameters.get("phase")
@@ -205,7 +320,8 @@ class BrowserTool:
                 return ToolResult(status="failed", message=f"{phase} phase failed: {error}", output={"phase": str(phase)})
         url = plan.parameters.get("url")
         if not url:
-            return ToolResult(status="completed", output={"message": "No URL was supplied for browser observation."})
+            verification = VerificationResult.from_checks({"url_supplied": False}, summary="Not verified: no URL was supplied for browser observation.").model_dump()
+            return ToolResult(status="completed", output={"message": "No URL was supplied for browser observation.", "verification": verification})
         try:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=True)
@@ -214,7 +330,13 @@ class BrowserTool:
                 observation = observe_page(page)
                 browser.close()
             raw = observation.model_dump()
-            return ToolResult(status="completed", output={**raw, "observation": from_browser(raw).model_dump()})
+            data = raw.get("data", {})
+            verification = VerificationResult.from_checks(
+                {"page_reached": bool(data.get("url")), "content_captured": bool(data.get("visible_text") or data.get("links") or data.get("buttons") or data.get("title"))},
+                summary=f"Observed {data.get('title') or data.get('url')} ({len(str(data.get('visible_text') or ''))} visible characters).",
+                evidence=[str(data.get("url") or "")],
+            ).model_dump()
+            return ToolResult(status="completed", output={**raw, "observation": from_browser(raw).model_dump(), "verification": verification})
         except Exception:
             return ToolResult(status="failed", message="Browser observation failed safely.")
 

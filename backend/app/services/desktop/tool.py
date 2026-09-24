@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..agent.models import AgentRequest, PlanStep, ToolResult
+from ..agent.models import AgentRequest, PlanStep, ToolResult, VerificationResult
 from .actions import execute
 from .models import DesktopAction
 from .safety import requires_confirmation
@@ -48,7 +48,13 @@ class DesktopTool:
         try:
             observation = execute(action, self.runtime_dir)
             raw = observation.model_dump()
-            return ToolResult(status="completed", output={**raw, "observation": from_desktop(raw).model_dump()})
+            evidence = [str(raw["screenshot"])] if raw.get("screenshot") else []
+            verification = VerificationResult.from_checks(
+                {"observation_captured": bool(raw.get("windows") or raw.get("controls") or raw.get("screenshot") or raw.get("screen_size"))},
+                summary=f"Desktop observation captured ({len(raw.get('windows') or [])} windows, {len(raw.get('controls') or [])} controls).",
+                evidence=evidence,
+            ).model_dump()
+            return ToolResult(status="completed", output={**raw, "observation": from_desktop(raw).model_dump(), "verification": verification})
         except (ValueError, LookupError, FileNotFoundError, PermissionError) as error:
             return ToolResult(status="failed", message=str(error))
         except Exception:

@@ -1251,6 +1251,14 @@ def agent_progress(run_id: str, event: str, step_index: int, data: dict[str, Any
         with db() as connection:
             connection.execute("UPDATE run_steps SET status = ? WHERE run_id = ? AND step_index = ?", ("waiting_confirmation", run_id, step_index))
         safe_set_run(run_id, "waiting_confirmation", current_step=step_index, current_action="Waiting for approval", error=None)
+    elif event == "observe":
+        write_audit("observe", f"step {step_index + 1}: {data.get('summary', '')}")
+    elif event == "decide":
+        write_audit("decide", f"step {step_index + 1}: {data.get('kind', 'execute')} — {data.get('reason', '')}")
+    elif event == "verify":
+        write_audit("verify", f"step {step_index + 1}: {'passed' if data.get('passed') else 'failed'} — {data.get('summary', '')}")
+    elif event == "recover":
+        write_audit("recover", f"step {step_index + 1}: {data.get('kind', 'stop')} — {data.get('reason', '')}")
 
 
 def execute_agent_run(run_id: str, request: str, variables: dict[str, str]) -> None:
