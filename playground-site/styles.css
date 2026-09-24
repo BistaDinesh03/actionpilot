@@ -1,0 +1,99 @@
+/* ActionPilot Playground — plain local engineering styles.
+   No gradients, no animation, no dependencies. */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  color: #1a1a1a;
+  background: #ffffff;
+  line-height: 1.45;
+}
+
+header, main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 12px 16px;
+}
+
+h1 { font-size: 20px; margin: 8px 0 4px; }
+h2 { font-size: 14px; margin: 16px 0 6px; }
+h3 { font-size: 15px; margin: 0 0 6px; }
+
+a { color: #10417a; }
+
+.pf-expected { font-size: 13px; color: #444444; margin: 2px 0 0; }
+.pf-hint { font-size: 12px; color: #555555; }
+
+.pf-card {
+  border: 1px solid #bbbbbb;
+  padding: 14px;
+  background: #ffffff;
+}
+
+label {
+  display: block;
+  font-size: 13px;
+  margin: 8px 0 2px;
+}
+
+input[type="text"],
+input[type="email"],
+select {
+  width: 100%;
+  padding: 6px;
+  font-size: 14px;
+  border: 1px solid #999999;
+  background: #ffffff;
+}
+
+button {
+  margin-top: 10px;
+  padding: 6px 14px;
+  font-size: 14px;
+  border: 1px solid #333333;
+  background: #f4f4f4;
+  cursor: pointer;
+}
+
+.pf-check { margin-top: 10px; }
+.pf-hidden { display: none; }
+
+.pf-status {
+  font-size: 13px;
+  font-family: monospace;
+  margin-top: 10px;
+}
+
+.pf-result {
+  border: 1px solid #999999;
+  padding: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  background: #fafafa;
+}
+
+pre {
+  border: 1px solid #cccccc;
+  padding: 8px;
+  background: #f7f7f7;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.pf-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+
+.pf-table th,
+.pf-table td {
+  border: 1px solid #cccccc;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+code { font-size: 12px; }

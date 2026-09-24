@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ActionPilot Playground scenario</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1 id="pf-title">ActionPilot Playground</h1>
+    <p id="pf-expected" class="pf-expected"></p>
+  </header>
+  <main>
+    <div id="pf-root" class="pf-card">Loading scenario&hellip;</div>
+
+    <h2>Scenario state</h2>
+    <pre id="pf-state">{}</pre>
+    <p>
+      <a href="" id="pf-reset">Reset scenario</a> &middot;
+      <a href="index.html">All scenarios</a>
+    </p>
+    <p class="pf-hint">
+      Start: open this page with <code>?scenario=&lt;name&gt;</code>.
+      Control surface: <code>window.__playground</code> &mdash;
+      <code>state</code> (inspect), <code>reset()</code>, <code>mutate(name)</code>.
+    </p>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

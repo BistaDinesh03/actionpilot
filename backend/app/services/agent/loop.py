@@ -34,6 +34,8 @@ def is_idempotent_step(step: PlanStep) -> bool:
         return False
     if step.tool in _MUTATING_TOOLS:
         return False
+    if step.tool == "playground":
+        return True  # local synthetic playground pages: safe to retry within the same budgets
     if step.tool == "web_research":
         return True  # read-only browsing and summarising
     if step.tool == "browser":

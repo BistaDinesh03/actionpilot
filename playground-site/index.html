@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ActionPilot Playground</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>ActionPilot Playground</h1>
+    <p class="pf-expected">Local, deterministic adaptive-execution scenarios. No network, no AI, synthetic data only.</p>
+  </header>
+  <main>
+    <table class="pf-table">
+      <thead>
+        <tr><th>Scenario</th><th>What it proves</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><a href="playground.html?scenario=normal">1 — Normal form completion</a></td>
+          <td>observe &rarr; fill &rarr; submit &rarr; verify happy path</td>
+        </tr>
+        <tr>
+          <td><a href="playground.html?scenario=target-change">2 — Target changes</a></td>
+          <td>stale target &rarr; fresh observation &rarr; deterministic re-target</td>
+        </tr>
+        <tr>
+          <td><a href="playground.html?scenario=verify-delay">3 — Verification delay</a></td>
+          <td>action success vs. a distinct, bounded verification phase</td>
+        </tr>
+        <tr>
+          <td><a href="playground.html?scenario=recovery">4 — Bounded recovery</a></td>
+          <td>failure &rarr; recovery decision &rarr; re-observe &rarr; re-target &rarr; success</td>
+        </tr>
+        <tr>
+          <td><a href="playground.html?scenario=approval">5 — Approval</a></td>
+          <td>runtime risk &rarr; existing approval gate (approve and deny)</td>
+        </tr>
+        <tr>
+          <td><a href="playground.html?scenario=failure">6 — Terminal failure</a></td>
+          <td>existing budgets stop an unrecoverable failure safely</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="pf-hint">
+      Serve locally with <code>python -m http.server 4174 --directory playground-site</code>
+      and open the local address it prints. Tests serve these files themselves on an
+      ephemeral port. See <code>docs/PLAYGROUND.md</code>.
+    </p>
+  </main>
+</body>
+</html>
