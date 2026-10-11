@@ -25,7 +25,7 @@ from playwright.sync_api import Page
 
 from ..computer.observation import from_browser
 from ..execution.browser import BrowserSession
-from .browser_tool import LOCAL_HOSTS, BrowserTool
+from .browser_tool import LOCAL_HOSTS, SESSION_ID_PATTERN, BrowserTool
 from .models import AgentRequest, Decision, MAX_RETARGETS, PlanStep, ToolResult, VerificationResult
 from .observer import observe_page
 from .state import Observation
@@ -65,6 +65,8 @@ class PlaygroundTool:
     # ------------------------------------------------------------------
     # session helpers
     def _start_session(self, session_id: str) -> tuple[BrowserSession, Page]:
+        if not SESSION_ID_PATTERN.fullmatch(session_id):
+            raise RuntimeError(f"Refusing to run: invalid playground session id {session_id!r}.")
         if self._session is None:
             self._session = BrowserSession(self.runtime_root, headless=True)
             self._session.start()

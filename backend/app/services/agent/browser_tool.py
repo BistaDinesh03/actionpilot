@@ -22,6 +22,8 @@ from ..execution.models import ExecutionContext
 # The account flow only ever runs against the local demo site.
 DEFAULT_DEMO_URL = "http://127.0.0.1:4173/account.html"
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
+# Session ids become a runtime subdirectory name; keep them strictly inert.
+SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}")
 # Semantic planned target for the submit action. The decision layer compares
 # it against a fresh bounded observation before any click happens.
 PLANNED_SUBMIT_TARGET = {"role": "button", "name": "Submit"}
@@ -87,6 +89,8 @@ class BrowserTool:
 
     def _start_session(self, parameters: dict[str, Any]) -> tuple[BrowserSession, Any]:
         session_id = str(parameters["session_id"])
+        if not SESSION_ID_PATTERN.fullmatch(session_id):
+            raise RuntimeError(f"Refusing to run: invalid browser session id {session_id!r}.")
         session = self._sessions.get(session_id)
         page = session.page if session else None
         if session is None or page is None:
