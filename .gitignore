@@ -11,6 +11,7 @@ dist/
 playwright/.auth/
 backend/screenshots/
 runtime/
+test-results/
 
 # Local credentials, browser sessions, and secret material
 **/token*.json

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 import asyncio, sys
 if sys.platform == 'win32':
@@ -37,6 +38,9 @@ from .services.gmail.service import GmailService, parse_email_command
 from .services.matching.matcher import match_command
 
 ROOT = Path(__file__).resolve().parents[2]
+# Load the optional repo-root .env so the documented configuration actually
+# works; variables already present in the shell environment always win.
+load_dotenv(ROOT / ".env")
 DB_PATH = ROOT / "actionpilot.db"
 gmail_service = GmailService(ROOT)
 agent_registry = build_default_registry(match_command, gmail_service, ROOT / "runtime" / "desktop")
