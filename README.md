@@ -1,14 +1,18 @@
 # ActionPilot
 
-**Record a browser workflow. Replay it locally.**
+**Show it once. Let it do it again.**
 
 ![ActionPilot icon](extension/icons/icon128.png)
 
 ActionPilot is a local-first browser automation tool. You record a workflow once
 in your browser, save it as a reusable **Skill**, and replay it later — with the
-same data or with different values. Everything runs on your machine.
+same data or with different values. You can also describe a task in the Command
+box: ActionPilot plans it, executes it step by step with observation and
+verification, asks for your approval before high-risk steps, and recovers from
+common failures within hard budgets. Everything runs on your machine.
 
-**Full walkthrough:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
+**Full walkthrough:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ·
+**Design details:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## What it does
 
@@ -17,6 +21,10 @@ same data or with different values. Everything runs on your machine.
 - **Replay** — run the Skill in Playwright Chromium, headless or visible.
 - **Inspect** — open Run Details: per-step screenshots, run video, and a timeline.
 - **Export** — download any Skill as a standalone Playwright `.spec.ts` test.
+- **Command** — describe a task in your own words; ActionPilot matches a Skill
+  or builds an agent plan and executes it with observation and verification.
+- **Stay in control** — high-risk steps pause for your approval; reject stops
+  the run. Recovery and retries are hard-bounded.
 
 ## Why ActionPilot
 
@@ -40,6 +48,16 @@ same data or with different values. Everything runs on your machine.
 - Delete confirmation for Skills
 - Sensitive-field filtering — password, token, payment, and secret fields are
   never recorded
+- Runtime risk classification with an authoritative approval gate
+  (approve or reject; denial stops the run safely)
+- Verified completion — success is reported only after a step's effect is
+  observed; action failures and verification failures are reported separately
+- Bounded automatic recovery (retries, re-targeting, re-observation) with hard
+  budget caps
+- Startup reconciliation — runs interrupted by a crash are marked honestly
+  instead of being left "running"
+- Secret-safe evidence — audit and approval records mask typed secrets
+  (`password=...` becomes `[redacted]`)
 
 ## Quick Start
 
@@ -57,6 +75,11 @@ pip install -r backend/requirements.txt
 cd frontend; npm install; cd ..
 cd extension; npm install; npm run build; cd ..
 ```
+
+Optional configuration: copy `.env.example` to `.env` and fill in
+placeholders if you use the optional Gmail integration. The backend loads
+`.env` from the repository root at startup; shell environment variables
+always win. Never commit a real `.env`.
 
 ### 2. Start the backend and frontend
 
@@ -159,16 +182,36 @@ The export uses real Playwright APIs (`page.goto`, `getByRole`, `getByLabel`,
 Placeholders like `{{name}}` are preserved so you can substitute them with your
 own fixtures.
 
+## Testing
+
+```powershell
+# Backend: unit + local-browser E2E tests
+# (first time only: python -m playwright install chromium)
+cd backend; python -m pytest -q
+
+# Frontend: typecheck and production build
+cd frontend; npm test; npm run build
+```
+
+CI runs both on every push and pull request
+(`.github/workflows/ci.yml`): the backend suite on Windows (the supported
+platform) and the frontend typecheck/build on Linux.
+
+Developer-oriented tests for the adaptive execution layer are described in
+[docs/PLAYGROUND.md](docs/PLAYGROUND.md).
+
 ## Project structure
 
 ```text
-extension/   Manifest V3 recorder (TypeScript, esbuild)
-frontend/    React + Vite UI
-backend/     FastAPI server, SQLite storage, Playwright executor
-docs/        User guide
-demo-site/   Local demo shop and form pages
-scripts/     dev.ps1 (start app), demo.ps1 (start demo shop)
-runtime/     Run artifacts: screenshots and video (git-ignored)
+extension/       Manifest V3 recorder (TypeScript, esbuild)
+frontend/        React + Vite UI
+backend/         FastAPI server, SQLite storage, Playwright executor, agent loop
+docs/            User guide, architecture, playground notes
+demo-site/       Local demo shop and form pages
+agent-test-site/ Static fixtures for agent E2E tests
+playground-site/ Deterministic local scenarios for adaptive-execution tests
+scripts/         dev.ps1 (start app), demo.ps1 (start demo shop)
+runtime/         Run artifacts: screenshots, video, Gmail token (git-ignored)
 ```
 
 ## Privacy
@@ -181,6 +224,15 @@ runtime/     Run artifacts: screenshots and video (git-ignored)
 - **Network:** the app talks to your local backend and to the sites you choose
   to run against. The UI loads its two fonts from Google Fonts (typography
   only; no data is sent beyond the font request).
+- **Evidence is redacted:** audit records and approval cards mask secret-looking
+  text (`password=...` → `[redacted]`); approval records never store typed form
+  values; agent observations never read input field values.
+- **What is stored:** Skill steps keep the values you recorded (that is what
+  replay needs), each run keeps its variables, and screenshots/video live under
+  `runtime/runs/<run-id>/`. Cleanup is manual: stop the app and delete
+  `actionpilot.db` and `runtime/`.
+- **Optional Gmail:** if enabled, the Google OAuth refresh token is stored in
+  plaintext at `runtime/gmail/token.json` on your machine.
 
 ## Limitations
 
@@ -199,12 +251,27 @@ runtime/     Run artifacts: screenshots and video (git-ignored)
 - **No Skill JSON import.** Playwright test export is available; Skill
   import/export as JSON is not.
 - **Local-only** — no cloud sync, accounts, or sharing.
+- **No authentication:** the API binds to `127.0.0.1` and trusts every local
+  process. Do not expose the port to a network you do not control.
+- **Backend is Windows-only** (pywinauto/pywin32 pins); the frontend and the
+  browser-only pieces have no hard Windows dependency but are only verified on
+  Windows.
+- **No retention automation** — old runs, screenshots, and video are kept until
+  you delete them.
 
 ## Status
 
-ActionPilot is a **local-first v0.1 release candidate** covering the
-record → save → replay → inspect → export workflow on Windows.
+ActionPilot is a **local-first v0.1** release covering the
+record → save → replay → inspect → export workflow and the command-driven
+agent execution loop (observe → decide → act → verify → recover, with
+approval gates and bounded budgets) on Windows. The backend ships 181 passing
+tests; CI runs the backend suite on Windows and the frontend
+typecheck/build on every push.
 
 The repository also contains experimental integrations (Gmail, web research,
 desktop control, memory, and routines) that are **not part of this release's
 verified workflow** and may change without notice.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) to pitch in, [SECURITY.md](SECURITY.md)
+to report a vulnerability responsibly, and [CHANGELOG.md](CHANGELOG.md) for
+what changed.
