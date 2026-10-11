@@ -40,13 +40,32 @@ trust boundary:
   personal browser profile, cookies, or logins.
 - Sensitive recording is filtered at capture time: password, token, payment,
   and secret fields are never recorded (extension and backend both filter).
-- Audit and approval records **redact** secret-looking text (`password=...`
-  becomes `[redacted]`), and approval records never store typed form values.
+- Audit, approval, and run-title records **redact** secret-looking text
+  (`password=...` becomes `[redacted]`), approval records never store typed
+  form values, and failure messages are stored as a single bounded line
+  (`ErrorType: message`) — never a stack trace.
+- File-serving endpoints re-check every stored path against `runtime/` before
+  opening it, so a poisoned database row cannot become an arbitrary file read.
 - High-risk actions require an explicit human approval; rejection stops the
   run. Unsupported destructive desktop actions fail safely by allowlist.
 - Optional Gmail support stores its OAuth refresh token **in plaintext** at
   `runtime/gmail/token.json` (git-ignored). Disable it if that is unacceptable
   on your machine.
+
+### Accepted limitations (by design, not defects)
+
+- **No authentication on localhost.** Any local process can call the API. This
+  is a convenience trade-off, not a claim of safety against other local users
+  or malware — see the trust boundary above.
+- **Run records keep the original request text** in `runs.plan`. An approved
+  run resumes by re-planning from that exact text, so it is stored verbatim.
+  The displayed run title and the audit trail mask it.
+- **Approvals and pauses wait indefinitely.** A paused run holds its thread
+  until you decide or stop the app; there is no approval timeout.
+- **The optional Gmail token file is plaintext**, and its OAuth endpoints use
+  GET redirects as Google requires.
+- **No retention automation.** Deletion is manual (stop the app, delete
+  `actionpilot.db` and `runtime/`).
 
 ## Data at rest
 

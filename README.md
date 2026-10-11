@@ -222,14 +222,16 @@ runtime/         Run artifacts: screenshots, video, Gmail token (git-ignored)
 - **Recording is filtered:** password, token, payment, and secret fields are
   never captured. Cookies, credentials, and browser storage are never read.
 - **Network:** the app talks to your local backend and to the sites you choose
-  to run against. The UI loads its two fonts from Google Fonts (typography
-  only; no data is sent beyond the font request).
-- **Evidence is redacted:** audit records and approval cards mask secret-looking
-  text (`password=...` → `[redacted]`); approval records never store typed form
-  values; agent observations never read input field values.
+  to run against. The UI loads no remote resources at all — typography uses
+  your system's built-in fonts, and nothing is fetched from a CDN.
+- **Evidence is redacted:** audit records, approval cards, and run titles mask
+  secret-looking text (`password=...` → `[redacted]`); approval records never
+  store typed form values; agent observations never read input field values.
+  Failure messages are one line (`ErrorType: message`), never a stack trace.
 - **What is stored:** Skill steps keep the values you recorded (that is what
-  replay needs), each run keeps its variables, and screenshots/video live under
-  `runtime/runs/<run-id>/`. Cleanup is manual: stop the app and delete
+  replay needs), each run keeps its variables plus the original request text
+  (an approved run resumes from that exact text), and screenshots/video live
+  under `runtime/runs/<run-id>/`. Cleanup is manual: stop the app and delete
   `actionpilot.db` and `runtime/`.
 - **Optional Gmail:** if enabled, the Google OAuth refresh token is stored in
   plaintext at `runtime/gmail/token.json` on your machine.
@@ -245,6 +247,8 @@ runtime/         Run artifacts: screenshots, video, Gmail token (git-ignored)
   via the API (see the user guide).
 - **No conditional logic** (if/else) inside Skills.
 - **One run at a time.**
+- **Approvals wait indefinitely.** A run paused for approval stays paused until
+  you decide or stop it; there is no timeout.
 - **Selector drift:** steps are recorded from the live DOM; heavily dynamic
   sites may need re-recording.
 - **No scheduler** — runs start when you click Run.
@@ -264,7 +268,7 @@ runtime/         Run artifacts: screenshots, video, Gmail token (git-ignored)
 ActionPilot is a **local-first v0.1** release covering the
 record → save → replay → inspect → export workflow and the command-driven
 agent execution loop (observe → decide → act → verify → recover, with
-approval gates and bounded budgets) on Windows. The backend ships 181 passing
+approval gates and bounded budgets) on Windows. The backend ships 202 passing
 tests; CI runs the backend suite on Windows and the frontend
 typecheck/build on every push.
 

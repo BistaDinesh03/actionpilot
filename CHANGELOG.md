@@ -4,6 +4,52 @@ All notable changes to ActionPilot are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Pre-publication security, accessibility, and dependency work committed after
+the `v0.1.0` tag. Nothing here changes the tagged release.
+
+### Security
+
+- Run failures are persisted as a single bounded, redacted line
+  (`ErrorType: message`) instead of a full stack trace, which
+  `GET /api/runs/{id}` returned unauthenticated.
+- Screenshot and video endpoints re-check every stored path against
+  `runtime/` before opening it, so a poisoned database row cannot become an
+  arbitrary file read.
+- The phase-less browser-observation path now refuses non-local and
+  non-`http(s)` URLs, matching the rest of the automation layer.
+- A web-research plan without a web-research step returns `400` instead of an
+  unhandled `500`.
+- Agent plan and skill payloads are bounded (request length and step counts).
+- Run titles mask secret-looking text, matching the audit log; the operational
+  plan copy stays verbatim because approved runs resume from it.
+- Frontend: research source links render as links only for `http(s)` URLs, and
+  recorded-step messages are accepted only from the app's own origin.
+
+### Changed
+
+- Accessibility: run steps are keyboard-operable buttons; modals are dialogs
+  with Escape-to-close and labelled close buttons; a skip link, live regions
+  for run status/approvals/toasts, `aria-current` on navigation, and labels on
+  all inputs were added; the decorative avatar is no longer a focusable button.
+- The UI no longer imports Google Fonts — typography uses the system font
+  stack, so the app loads no remote resources at all.
+- The skill-run button label now matches its actual behaviour ("Run skill");
+  memory empty-state and Routines schedule copy clarified; the memory delete
+  button no longer stretches across the row.
+
+### Dependencies
+
+- `python-dotenv` 1.0.1 → 1.2.2, `pillow` 11.1.0 → 12.3.0, `pytest` 8.3.4 →
+  9.0.3, and `source-map-js` 1.2.1 → 1.2.2. OSV.dev reports no advisories for
+  any pinned backend package and `npm audit` reports none for the frontend.
+
+### Testing
+
+- 21 new regression tests (`backend/tests/test_security_hardening.py`);
+  backend suite is 202 tests.
+
 ## [0.1.0] - 2026-10-11
 
 First tagged release of the local-first workflow automation tool.

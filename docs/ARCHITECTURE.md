@@ -119,7 +119,7 @@ automation — deletion is manual.
 
 ## Testing map
 
-- `backend/tests/` — 181 tests: unit (state machine, matcher, recovery
+- `backend/tests/` — 202 tests: unit (state machine, matcher, recovery
   classification, redaction), API (TestClient), and local-browser E2E against
   `demo-site/`/`agent-test-site/` (replay, verification, approvals, adaptive
   loop, playground scenarios). Run: `python -m pytest -q`.

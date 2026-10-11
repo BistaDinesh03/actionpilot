@@ -83,10 +83,12 @@ class PlanStep(BaseModel):
 
 
 class AgentPlan(BaseModel):
-    request: str
+    request: str = Field(max_length=4000)
     intent: str
     confidence: float = Field(ge=0, le=1)
-    steps: list[PlanStep]
+    # The execution loop truncates at 15 steps; 50 bounds the accepted
+    # payload without constraining any legitimate plan.
+    steps: list[PlanStep] = Field(max_length=50)
     variables: dict[str, str] = Field(default_factory=dict)
     requires_confirmation: bool = False
     message: str | None = None

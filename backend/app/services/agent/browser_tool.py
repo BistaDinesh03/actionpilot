@@ -326,6 +326,8 @@ class BrowserTool:
         if not url:
             verification = VerificationResult.from_checks({"url_supplied": False}, summary="Not verified: no URL was supplied for browser observation.").model_dump()
             return ToolResult(status="completed", output={"message": "No URL was supplied for browser observation.", "verification": verification})
+        if url_error := self._local_url_error(str(url)):
+            return ToolResult(status="failed", message=url_error, output={"url_allowed": False})
         try:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=True)

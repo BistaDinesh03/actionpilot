@@ -184,10 +184,10 @@ class Step(BaseModel):
 class SkillCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=500)
-    steps: list[Step] = Field(default_factory=list)
-    domains: list[str] = Field(default_factory=list)
-    tags: list[str] = Field(default_factory=list)
-    capabilities: list[str] = Field(default_factory=list)
+    steps: list[Step] = Field(default_factory=list, max_length=500)
+    domains: list[str] = Field(default_factory=list, max_length=50)
+    tags: list[str] = Field(default_factory=list, max_length=50)
+    capabilities: list[str] = Field(default_factory=list, max_length=50)
 
 
 class CommandRequest(BaseModel):
@@ -270,6 +270,43 @@ def write_audit(event: str, detail: str) -> None:
         )
 
 
+def describe_error(error: BaseException) -> str:
+    """A short, non-technical failure message safe to persist and serve.
+
+    Full tracebacks embed absolute paths, interpreter frames and library
+    versions and are returned unauthenticated by ``GET /api/runs/{id}``, so
+    only the exception type and a bounded, redacted message are stored.
+    """
+    detail = redact_audit_text(f"{error}").strip()
+    return f"{type(error).__name__}: {detail[:300]}"
+
+
+def task_title(request_text: str) -> str:
+    """Run title / approval fallback text: same masking as the audit log.
+
+    ``runs.task_name`` is rendered in the UI, so it gets the same treatment
+    as audit evidence. The operational copy in ``runs.plan`` stays verbatim
+    because an approved run resumes by re-planning from that exact text.
+    """
+    return redact_audit_text(request_text)[:120]
+
+
+# Local artifacts (screenshots, recordings, exports) live under this tree.
+# Paths read back out of the database are re-checked against it before they
+# are opened, so a poisoned row cannot become an arbitrary file read. Resolved
+# on each call so tests that re-point ROOT keep working.
+def contained_runtime_path(candidate: str | Path) -> Path | None:
+    """Resolve ``candidate`` and return it only if it stays inside runtime/."""
+    try:
+        resolved = Path(candidate).resolve()
+        runtime_root = (ROOT / "runtime").resolve()
+    except (OSError, ValueError):
+        return None
+    if not resolved.is_relative_to(runtime_root):
+        return None
+    return resolved
+
+
 teach_sessions: dict[str, dict[str, Any]] = {}
 
 
@@ -349,7 +386,7 @@ def create_agent_run(plan: AgentPlan, status: str, output: dict[str, Any]) -> di
     # Waiting runs rest on their approval step; finished runs on the last step.
     current_step = first_high_risk_index(plan) if status == "waiting_confirmation" else len(plan.steps)
     with db() as connection:
-        connection.execute("INSERT INTO runs (id, skill_id, task_name, status, current_step, logs, created_at, variables, current_action, tool, plan, output, requires_confirmation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (run_id, None, plan.request[:120], status, current_step, json.dumps([step.action for step in plan.steps]), created, json.dumps(plan.variables), "Complete" if status == "completed" else "Waiting for approval", plan.steps[0].tool if plan.steps else None, plan.model_dump_json(), json.dumps(output), int(plan.requires_confirmation)))
+        connection.execute("INSERT INTO runs (id, skill_id, task_name, status, current_step, logs, created_at, variables, current_action, tool, plan, output, requires_confirmation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (run_id, None, task_title(plan.request), status, current_step, json.dumps([step.action for step in plan.steps]), created, json.dumps(plan.variables), "Complete" if status == "completed" else "Waiting for approval", plan.steps[0].tool if plan.steps else None, plan.model_dump_json(), json.dumps(output), int(plan.requires_confirmation)))
         for index, step in enumerate(plan.steps):
             connection.execute("INSERT INTO run_steps (id, run_id, step_index, label, action_type, status, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (str(uuid.uuid4()), run_id, index, step.action, step.tool, "completed" if status == "completed" else "waiting_confirmation", created, created if status == "completed" else None))
     return get_run_or_404(run_id)
@@ -572,7 +609,7 @@ def run_agent_request(payload: AgentRequest, plan: AgentPlan | None = None) -> d
     plan = plan or current_agent_plan(payload.request, payload.variables)
     if plan.intent == "run_skill" and plan.steps:
         step = plan.steps[0]
-        run = create_run(RunCreate(skill_id=str(step.parameters["skill_id"]), task_name=plan.request[:120], variables=plan.variables))
+        run = create_run(RunCreate(skill_id=str(step.parameters["skill_id"]), task_name=task_title(plan.request), variables=plan.variables))
         return {"run_id": run["id"], "status": "running", "state": {"goal": plan.request, "plan": plan.model_dump(), "tool_history": [{"tool": "skill", "action": step.action}]}}
     run_id = create_pending_agent_run(plan)
     run_controls[run_id] = {"stop": threading.Event(), "pause": threading.Event()}
@@ -700,14 +737,16 @@ def agent_execute(payload: AgentExecuteRequest) -> dict[str, Any]:
             request_upfront_approval(run["id"], plan)
             return {"status": "waiting_confirmation", "requires_confirmation": True, "run_id": run["id"], "message": "Explicit approval is required before this action."}
         step = plan.steps[0]
-        run = create_run(RunCreate(skill_id=str(step.parameters["skill_id"]), task_name=plan.request[:120], variables=plan.variables))
+        run = create_run(RunCreate(skill_id=str(step.parameters["skill_id"]), task_name=task_title(plan.request), variables=plan.variables))
         return {"status": "started", "run_id": run["id"], "tool": "skill"}
     if plan.intent == "local_account":
         # Deterministic local demo flow: run in the background and report live progress.
         return run_agent_request(payload, plan)
     if plan.intent in {"web_research", "research_and_email"}:
         tool = agent_registry.get("web_research")
-        research_step = next(step for step in plan.steps if step.tool == "web_research")
+        research_step = next((step for step in plan.steps if step.tool == "web_research"), None)
+        if research_step is None:
+            raise HTTPException(400, "Plan declares web research but contains no web_research step.")
         result = tool.execute(research_step, approved=payload.approved)
         if plan.intent == "research_and_email" and result.status == "completed" and gmail_service.status() == "connected":
             email_intent = parse_email_command(plan.request)
@@ -817,17 +856,17 @@ def get_run(run_id: str) -> dict[str, Any]:
 @app.get("/api/runs/{run_id}/screenshot")
 def get_run_screenshot(run_id: str) -> FileResponse:
     run = get_run_or_404(run_id)
-    screenshot = run.get("screenshot_path")
-    if not screenshot or not Path(screenshot).is_file():
+    screenshot = contained_runtime_path(run.get("screenshot_path") or "")
+    if not screenshot or not screenshot.is_file():
         raise HTTPException(404, "Screenshot not found")
-    return FileResponse(screenshot, media_type="image/png", filename=Path(screenshot).name)
+    return FileResponse(screenshot, media_type="image/png", filename=screenshot.name)
 
 
 @app.get("/api/runs/{run_id}/video")
 def get_run_video(run_id: str):
     run = get_run_or_404(run_id)
-    video_dir = ROOT / "runtime" / "runs" / run["id"] / "video"
-    if not video_dir.is_dir():
+    video_dir = contained_runtime_path(ROOT / "runtime" / "runs" / run["id"] / "video")
+    if not video_dir or not video_dir.is_dir():
         raise HTTPException(404, "Video not found")
     files = sorted(video_dir.glob("*.webm"))
     if not files:
@@ -850,8 +889,8 @@ def get_run_step_screenshot(run_id: str, step_index: int) -> FileResponse:
         row = connection.execute("SELECT screenshot_path FROM run_steps WHERE run_id = ? AND step_index = ?", (run_id, step_index)).fetchone()
     if not row or not row[0]:
         raise HTTPException(404, "Step screenshot not found")
-    path = Path(row[0])
-    if not path.is_file():
+    path = contained_runtime_path(row[0])
+    if not path or not path.is_file():
         raise HTTPException(404, "Step screenshot file missing")
     return FileResponse(path, media_type="image/png", filename=path.name)
 
@@ -966,9 +1005,7 @@ def execute_run(run_id: str, skill_id: str, variables: dict[str, str]) -> None:
         safe_set_run(run_id, "stopped", current_action=str(error) or "Stopped by user")
     except Exception as error:
         if not controls["stop"].is_set():
-            import traceback
-            _tb = traceback.format_exc()
-            safe_set_run(run_id, "failed", error=f"{type(error).__name__}: {error}" + chr(10) + _tb, current_action="Failed")
+            safe_set_run(run_id, "failed", error=describe_error(error), current_action="Failed")
     finally:
         run_controls.pop(run_id, None)
 
@@ -1104,8 +1141,8 @@ def request_upfront_approval(run_id: str, plan: AgentPlan) -> None:
     """Attach the single approval row for an upfront-gated waiting run."""
     index = first_high_risk_index(plan)
     step = plan.steps[index] if plan.steps else None
-    summary = step.action if step else plan.request[:120]
-    detail = step.model_dump() if step else {"action": plan.request[:120], "risk": "high"}
+    summary = step.action if step else task_title(plan.request)
+    detail = step.model_dump() if step else {"action": task_title(plan.request), "risk": "high"}
     create_approval(run_id, index, summary, detail, kind="upfront")
     write_audit("approval_requested", f"step {index + 1}: {summary}")
 
@@ -1243,7 +1280,7 @@ def create_pending_agent_run(plan: AgentPlan) -> str:
     with db() as connection:
         connection.execute(
             "INSERT INTO runs (id, skill_id, task_name, status, current_step, logs, created_at, variables, current_action, tool, plan, output, requires_confirmation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (run_id, None, plan.request[:120], "queued", 0, json.dumps([step.action for step in plan.steps]), created, json.dumps(plan.variables), "Planning", plan.steps[0].tool if plan.steps else None, plan.model_dump_json(), json.dumps({}), int(plan.requires_confirmation)),
+            (run_id, None, task_title(plan.request), "queued", 0, json.dumps([step.action for step in plan.steps]), created, json.dumps(plan.variables), "Planning", plan.steps[0].tool if plan.steps else None, plan.model_dump_json(), json.dumps({}), int(plan.requires_confirmation)),
         )
         for index, step in enumerate(plan.steps):
             connection.execute(
@@ -1330,10 +1367,8 @@ def execute_agent_run(run_id: str, request: str, variables: dict[str, str]) -> N
         safe_set_run(run_id, state.status, current_step=state.current_step, current_action=final_action, error=state.error)
         write_audit("agent_run_finished", f"{state.status}: {request[:120]}")
     except Exception as error:
-        import traceback
-        _tb = traceback.format_exc()
         if not controls["stop"].is_set():
-            safe_set_run(run_id, "failed", error=f"{type(error).__name__}: {error}" + chr(10) + _tb, current_action="Failed")
+            safe_set_run(run_id, "failed", error=describe_error(error), current_action="Failed")
         write_audit("agent_run_finished", f"failed: {request[:120]}")
     finally:
         try:

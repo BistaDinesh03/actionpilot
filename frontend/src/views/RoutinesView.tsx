@@ -29,8 +29,8 @@ export function RoutinesView() {
       <h2>Routines</h2>
       <p>Save a prompt and rerun it later with the same plan and approval rules.</p>
       <div className="memory-form">
-        <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Morning Research" />
-        <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Research recent AI automation posts and give me 5 ideas." />
+        <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Product feedback digest" aria-label="Routine name" />
+        <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Research recent AI automation posts and give me 5 ideas." aria-label="Routine prompt" />
         <button className="primary-button" onClick={add}><Plus size={16} />Create routine</button>
       </div>
       {items === null ? <p className="muted">Loading routines…</p>
@@ -40,7 +40,7 @@ export function RoutinesView() {
           <div className="full-skill-list">
             {items.map((item) => (
               <div key={item.id}>
-                <span><strong>{item.name}</strong><small>{item.schedule} · {item.enabled ? 'Enabled' : 'Paused'}</small></span>
+                <span><strong>{item.name}</strong><small>{item.schedule === 'manual' ? 'Manual run' : item.schedule} · {item.enabled ? 'Enabled' : 'Paused'}</small></span>
                 <button className="card-run" onClick={() => run(item.id)}>Run now <ArrowUpRight size={15} /></button>
               </div>
             ))}

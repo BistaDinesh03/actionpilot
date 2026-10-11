@@ -117,6 +117,7 @@ export function RunView({ run, setRun }: { run: Run; setRun: (run: Run | null) =
 
     <div className="run-body">
       <div className="run-left">
+        <div className="approval-feed" role="status" aria-live="polite">
         {approvals.map((approval) => (
           <div className="approval-card" key={approval.id}>
             <div className="approval-head"><ShieldCheck size={18} /><div><span className="eyebrow">APPROVAL REQUIRED</span><strong>{approval.summary}</strong></div></div>
@@ -128,15 +129,16 @@ export function RunView({ run, setRun }: { run: Run; setRun: (run: Run | null) =
             </div>
           </div>
         ))}
+        </div>
         <div className="step-list">
           {run.steps.map((step) => {
             const isActive = step.step_index === activeIndex;
             const cls = `step-row${isActive ? ' active' : ''}${step.status === 'failed' ? ' failed' : ''}${step.status === 'running' ? ' running' : ''}`;
-            return <div className={cls} key={step.step_index} onClick={() => onStepClick(step)} title="Click to view this step">
+            return <button type="button" className={cls} key={step.step_index} onClick={() => onStepClick(step)} title="View this step" aria-pressed={isActive}>
               <span className="step-number">{String(step.step_index + 1).padStart(2, '0')}</span>
               <span>{step.label || step.error || 'Browser action'}</span>
               <span className={`step-type ${step.status}`}>{stepStatusLabel(step, run, approvalSteps)}</span>
-            </div>;
+            </button>;
           })}
           {plannedRows.map((row) => (
             <div className="step-row planned" key={`planned-${row.step_index}`} title="Part of the plan, not started yet">
@@ -211,7 +213,7 @@ export function RunView({ run, setRun }: { run: Run; setRun: (run: Run | null) =
             <div className="run-result-row"><span>Evidence</span><b>{run.steps.filter((s) => s.screenshot_path).length} screenshots{videoAvailable ? ' + video' : ''}</b></div>
             {verification && <div className="run-result-row"><span>Verification</span><b className={verification.passed ? 'step-type completed' : 'step-type failed'}>{verification.passed ? 'Verified' : 'Not verified'}</b></div>}
             {verification?.summary && <div className="run-result-row"><span>Result</span><b>{verification.summary}</b></div>}
-            {run.error ? <p className="error-text">{run.error}</p> : !run.status.includes('completed') ? <p className="muted">{run.current_action || 'Run ended.'}</p> : null}
+            {run.error ? <p className="error-text">{errorHeadline(run.error)}</p> : !run.status.includes('completed') ? <p className="muted">{run.current_action || 'Run ended.'}</p> : null}
           </div>
         )}
       </div>

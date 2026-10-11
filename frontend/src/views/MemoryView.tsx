@@ -30,19 +30,19 @@ export function MemoryView() {
       <h2>What does ActionPilot remember?</h2>
       <p>Only explicit preferences and saved routines belong here — nothing is guessed or tracked.</p>
       <div className="memory-form">
-        <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Preference title" />
-        <textarea value={value} onChange={(event) => setValue(event.target.value)} placeholder="When I ask for content ideas, include a hook and why it may work." />
+        <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Preference title" aria-label="Preference title" />
+        <textarea value={value} onChange={(event) => setValue(event.target.value)} placeholder="When I ask for content ideas, include a hook and why it may work." aria-label="Preference details" />
         <button className="primary-button" onClick={add}><Plus size={16} />Save memory</button>
       </div>
       {items === null ? <p className="muted">Loading memory…</p>
         : error && items.length === 0 ? <p className="muted">Couldn't reach the local backend to load memory.</p>
-        : items.length === 0 ? <p className="muted empty-state">ActionPilot will remember reusable workflows and preferences as you teach it.</p>
+        : items.length === 0 ? <p className="muted empty-state">Nothing saved yet — add a preference and ActionPilot will use it the next time it plans a task.</p>
         : (
           <div className="full-skill-list">
             {items.map((item) => (
               <div key={item.id}>
-                <span><strong>{item.title}</strong><small>{item.type} · {item.value}</small></span>
-                <button className="delete-step" onClick={() => remove(item.id)} title="Forget this memory"><Trash2 size={14} /></button>
+                <span><strong>{item.title}</strong><small>{item.type === 'user_preference' ? 'preference' : item.type} · {item.value}</small></span>
+                <button className="delete-step" onClick={() => remove(item.id)} title="Forget this memory" aria-label={`Forget ${item.title}`}><Trash2 size={14} /></button>
               </div>
             ))}
           </div>
