@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -240,11 +241,28 @@ def skill_from_row(row: sqlite3.Row) -> dict[str, Any]:
     return item
 
 
+# Secret-looking assignments (`password=...`, `token: ...`) must never persist
+# in audit evidence; the vocabulary mirrors is_sensitive_event below.
+SENSITIVE_WORDS = r"(?:password|passwd|token|secret|api[_\- ]?key|access[_\- ]?key|credential)"
+SENSITIVE_ASSIGNMENT = re.compile(rf"(?i)\b([\w\-]*{SENSITIVE_WORDS}[\w\-]*)([ \t]*[=:][ \t]*)([^\s,;]+)")
+BEARER_TOKEN = re.compile(r"(?i)\b(bearer)([ \t]+)([^\s,;]+)")
+
+
+def redact_audit_text(text: str) -> str:
+    """Mask secret-looking text before it reaches the audit log.
+
+    Commands and requests are stored as evidence of intent, so ordinary
+    words stay readable while typed secrets become a fixed marker.
+    """
+    masked = SENSITIVE_ASSIGNMENT.sub(lambda match: f"{match.group(1)}{match.group(2)}[redacted]", text)
+    return BEARER_TOKEN.sub(lambda match: f"{match.group(1)}{match.group(2)}[redacted]", masked)
+
+
 def write_audit(event: str, detail: str) -> None:
     with db() as connection:
         connection.execute(
             "INSERT INTO audit_logs VALUES (?, ?, ?, ?)",
-            (str(uuid.uuid4()), event, detail[:500], now()),
+            (str(uuid.uuid4()), event, redact_audit_text(detail)[:500], now()),
         )
 
 
@@ -1047,12 +1065,33 @@ def approval_from_row(row: sqlite3.Row) -> dict[str, Any]:
     return approval
 
 
+def sanitize_approval_detail(detail: dict[str, Any]) -> dict[str, Any]:
+    """Strip typed text from stored approval evidence.
+
+    The executor holds the real step in memory and nothing reads the stored
+    detail back to perform the action, so typed values never need to persist
+    here. Everything else (action, target, risk, session ids) stays intact.
+    """
+    cleaned: dict[str, Any] = {}
+    for key, value in detail.items():
+        if key == "value" and isinstance(value, str) and value:
+            cleaned[key] = "[redacted]"
+        elif key == "parameters" and isinstance(value, dict):
+            cleaned[key] = {
+                name: ("[redacted]" if name == "value" and isinstance(entry, str) and entry else entry)
+                for name, entry in value.items()
+            }
+        else:
+            cleaned[key] = value
+    return cleaned
+
+
 def create_approval(run_id: str, step_index: int, summary: str, detail: dict[str, Any], kind: str = "step") -> str:
     approval_id = str(uuid.uuid4())
     with db() as connection:
         connection.execute(
             "INSERT INTO approvals (id, run_id, step_index, kind, summary, detail, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (approval_id, run_id, step_index, kind, summary, json.dumps(detail), "pending", now()),
+            (approval_id, run_id, step_index, kind, summary, json.dumps(sanitize_approval_detail(detail)), "pending", now()),
         )
     return approval_id
 
