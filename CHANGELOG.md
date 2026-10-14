@@ -27,6 +27,11 @@ committed after the `v0.1.0` tag. Nothing here changes the tagged release.
 - Frontend: research source links render as links only for `http(s)` URLs, and
   recorded-step messages are accepted only from the app's own origin.
 
+### Added
+
+- Dependabot version updates for every pinned ecosystem (pip backend, npm
+  root/frontend/extension, GitHub Actions), weekly.
+
 ### Fixed
 
 - Agent-run step screenshots and the live preview load again: the browser
