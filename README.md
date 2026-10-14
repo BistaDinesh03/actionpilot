@@ -14,6 +14,13 @@ common failures within hard budgets. Everything runs on your machine.
 **Full walkthrough:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ·
 **Design details:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## See it in action
+
+A complete run against the bundled local demo site — describe the task,
+review the plan, watch it execute, and inspect the verified evidence:
+
+![How to use ActionPilot](docs/how-to-use.gif)
+
 ## What it does
 
 - **Record** — teach a workflow in a real browser with the ActionPilot extension.
@@ -268,7 +275,7 @@ runtime/         Run artifacts: screenshots, video, Gmail token (git-ignored)
 ActionPilot is a **local-first v0.1** release covering the
 record → save → replay → inspect → export workflow and the command-driven
 agent execution loop (observe → decide → act → verify → recover, with
-approval gates and bounded budgets) on Windows. The backend ships 202 passing
+approval gates and bounded budgets) on Windows. The backend ships 204 passing
 tests; CI runs the backend suite on Windows and the frontend
 typecheck/build on every push.
 

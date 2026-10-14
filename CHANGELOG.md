@@ -6,8 +6,8 @@ All notable changes to ActionPilot are documented here. The format follows
 
 ## [Unreleased]
 
-Pre-publication security, accessibility, and dependency work committed after
-the `v0.1.0` tag. Nothing here changes the tagged release.
+Pre-publication security, accessibility, dependency, and documentation work
+committed after the `v0.1.0` tag. Nothing here changes the tagged release.
 
 ### Security
 
@@ -26,6 +26,14 @@ the `v0.1.0` tag. Nothing here changes the tagged release.
   plan copy stays verbatim because approved runs resume from it.
 - Frontend: research source links render as links only for `http(s)` URLs, and
   recorded-step messages are accepted only from the app's own origin.
+
+### Fixed
+
+- Agent-run step screenshots and the live preview load again: the browser
+  tool now writes its session evidence under `runtime/agent/`, inside the
+  `runtime/` containment root the screenshot endpoints enforce. The
+  hardening above had regressed this to "Screenshot not available" for every
+  agent run; two new tests pin the wiring.
 
 ### Changed
 
@@ -47,8 +55,13 @@ the `v0.1.0` tag. Nothing here changes the tagged release.
 
 ### Testing
 
-- 21 new regression tests (`backend/tests/test_security_hardening.py`);
-  backend suite is 202 tests.
+- 23 new regression tests (`backend/tests/test_security_hardening.py`);
+  backend suite is 204 tests.
+
+### Docs
+
+- The README gained an animated how-to-use walkthrough
+  (`docs/how-to-use.gif`), recorded against the bundled local demo site.
 
 ## [0.1.0] - 2026-10-11
 
