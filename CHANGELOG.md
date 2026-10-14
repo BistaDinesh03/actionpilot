@@ -34,6 +34,10 @@ committed after the `v0.1.0` tag. Nothing here changes the tagged release.
   `runtime/` containment root the screenshot endpoints enforce. The
   hardening above had regressed this to "Screenshot not available" for every
   agent run; two new tests pin the wiring.
+- CI is green: the real-Notepad desktop test now skips on hosted CI runners
+  (their rewritten Notepad launches and accepts typing but does not expose
+  the typed text to the classic control readback). The test still runs on
+  every Windows dev machine; the other desktop-tool tests run everywhere.
 
 ### Changed
 

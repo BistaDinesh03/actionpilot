@@ -26,7 +26,18 @@ def test_high_risk_desktop_action_requires_confirmation(tmp_path):
     assert result.requires_confirmation is True
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows UI Automation is only available on Windows")
+ON_HOSTED_CI = os.environ.get("CI", "").lower() in {"true", "1"}
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or ON_HOSTED_CI,
+    reason=(
+        "needs an interactive Windows desktop; hosted CI runners' rewritten "
+        "Notepad launches and accepts typing but does not expose the typed "
+        "text to the classic control readback (the test still runs on every "
+        "Windows dev machine)"
+    ),
+)
 def test_real_notepad_desktop_flow(tmp_path):
     tool = DesktopTool(tmp_path)
     plan = tool.plan(AgentRequest(request="Open Notepad and write ActionPilot desktop test"))
