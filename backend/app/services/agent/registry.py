@@ -33,7 +33,7 @@ class ToolRegistry:
         return [{"name": tool.name, "description": tool.description, "capabilities": tool.capabilities, "risk_level": tool.risk_level} for tool in self._tools.values()]
 
 
-def build_default_registry(skill_matcher: Any, gmail_service: Any, runtime_dir: Any = None) -> ToolRegistry:
+def build_default_registry(skill_matcher: Any, gmail_service: Any, runtime_dir: Any = None, browser_runtime_dir: Any = None) -> ToolRegistry:
     from .agent import GmailTool, SkillTool, WebResearchTool
     from .browser_tool import BrowserTool
     from ..desktop.tool import DesktopTool
@@ -42,6 +42,9 @@ def build_default_registry(skill_matcher: Any, gmail_service: Any, runtime_dir: 
     registry.register(SkillTool(skill_matcher))
     registry.register(GmailTool(gmail_service))
     registry.register(WebResearchTool())
-    registry.register(BrowserTool())
+    # Agent browser sessions keep their screenshots under runtime/agent/ so the
+    # step-screenshot endpoint can serve them through contained_runtime_path();
+    # the %TEMP% default would be rejected by that containment check.
+    registry.register(BrowserTool(browser_runtime_dir))
     registry.register(DesktopTool(runtime_dir))
     return registry

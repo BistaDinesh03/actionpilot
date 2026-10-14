@@ -142,6 +142,29 @@ def test_step_screenshot_still_serves_runtime_files(client, tmp_path):
     assert client.get(f"/api/runs/{run_id}/step/0/screenshot").status_code == 200
 
 
+def test_step_screenshot_serves_agent_session_evidence(client, tmp_path):
+    """Agent-run evidence must stay servable after the containment fix.
+
+    The registry's browser tool used to default to ``%TEMP%``, which the
+    containment check rightly rejects, so Run Details showed "Screenshot not
+    available" for every agent run. It now writes under ``runtime/agent/``.
+    """
+    shot = tmp_path / "runtime" / "agent" / "session-1" / "open.png"
+    shot.parent.mkdir(parents=True)
+    shot.write_bytes(b"\x89PNG-fake")
+    run_id = make_completed_run()
+    add_step_screenshot(run_id, str(shot))
+    response = client.get(f"/api/runs/{run_id}/step/0/screenshot")
+    assert response.status_code == 200
+    assert response.content.startswith(b"\x89PNG")
+
+
+def test_app_browser_tool_keeps_evidence_under_runtime():
+    """Pin the app-level wiring: the registered browser tool never uses %TEMP%."""
+    root = main.agent_registry.get("browser").runtime_root.resolve()
+    assert root.is_relative_to((main.ROOT / "runtime").resolve())
+
+
 # --- browser observation stays local-only -----------------------------------
 
 

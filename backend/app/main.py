@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env")
 DB_PATH = ROOT / "actionpilot.db"
 gmail_service = GmailService(ROOT)
-agent_registry = build_default_registry(match_command, gmail_service, ROOT / "runtime" / "desktop")
+agent_registry = build_default_registry(match_command, gmail_service, ROOT / "runtime" / "desktop", ROOT / "runtime" / "agent")
 actionpilot_agent = ActionPilotAgent(agent_registry, AgentRouter(agent_registry))
 memory_store = MemoryStore(DB_PATH)
 routine_store = RoutineStore(DB_PATH)
