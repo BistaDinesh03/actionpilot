@@ -69,8 +69,15 @@ committed after the `v0.1.0` tag. Nothing here changes the tagged release.
 
 ### Docs
 
-- The README gained an animated how-to-use walkthrough
-  (`docs/how-to-use.gif`), recorded against the bundled local demo site.
+- The README was reorganized for first-time visitors: centered logo, title,
+  and tagline; a compact, accurate badge row (CI, platform, license); a
+  clearer section order (demo → how it works → key capabilities → quick
+  start → safety and approvals → documentation); and a new safety and
+  approvals section.
+- The animated how-to-use walkthrough (`docs/how-to-use.gif`) was
+  re-recorded as one complete real run against the bundled local demo site:
+  describe a task, review the plan, watch it execute, approve the sensitive
+  step at the approval gate, and inspect the result and its evidence.
 
 ## [0.1.0] - 2026-10-11
 
